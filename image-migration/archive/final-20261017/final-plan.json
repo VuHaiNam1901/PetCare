@@ -1,0 +1,22 @@
+{
+  "version": 3,
+  "batch_id": "manual-20261017-01",
+  "review_revision": "final-approved-20261017-01",
+  "backup_path": "original-products.json",
+  "backup_sha256": "f4e910dbb9ad80904e3d42289f7bed0d661c187d86eaf954021be71a2f4a6548",
+  "original_backup_sha256": "f4e910dbb9ad80904e3d42289f7bed0d661c187d86eaf954021be71a2f4a6548",
+  "manifest_path": "manifest.json",
+  "manifest_sha256": "c625174363f5a73db810037ecf028aa7b7224c7e06cdae66670de06453e62322",
+  "content_changes": {
+    "3": {
+      "name": "NEKKO Jelly pate mèo 70g",
+      "description": "Sản phẩm NEKKO Jelly pate mèo 70g. Giá tham khảo từ Petmall, có thể thay đổi."
+    },
+    "13": {
+      "name": "AFP PUPS Candy Chew – Đồ chơi cắn gặm kẹo xoắn cho chó",
+      "description": "Đồ chơi cắn gặm hình kẹo xoắn AFP PUPS Candy Chew dành cho chó."
+    }
+  },
+  "restore_scope": "image_url:all21; name,description:IDs3,13 only; preserve current price and every other live field",
+  "price_note": "ID3 current price is 18000 VND for one70g pouch, approved by user after the image migration; restore must preserve this price."
+}

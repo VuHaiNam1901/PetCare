@@ -1,0 +1,233 @@
+[
+  {
+    "product_id": 1,
+    "category_id": 1,
+    "name": "ME-O Tuna - Thức ăn hạt cho mèo vị cá ngừ 1.2kg",
+    "description": "Thức ăn hạt cho mèo vị cá ngừ, thương hiệu ME-O, khối lượng 1.2kg.",
+    "price": "152900.00",
+    "stock_quantity": 30,
+    "image_url": "https://cdn.hstatic.net/products/1000356051/3_0d12a88f69524b759f8adcbb01768994_compact.jpg",
+    "status": "Đang bán",
+    "created_at": "2026-10-16T15:43:33.000Z"
+  },
+  {
+    "product_id": 2,
+    "category_id": 1,
+    "name": "Royal Canin Satiety Weight Management Feline 1.5kg",
+    "description": "Sản phẩm Royal Canin Satiety Weight Management Feline 1.5kg. Giá tham khảo từ Petmall, có thể thay đổi.",
+    "price": "552000.00",
+    "stock_quantity": 20,
+    "image_url": "https://cdn.hstatic.net/products/1000356051/800g_da5234584f3e435da951c4c203b18bbb_small.jpg",
+    "status": "Đang bán",
+    "created_at": "2026-10-15T17:00:00.000Z"
+  },
+  {
+    "product_id": 3,
+    "category_id": 1,
+    "name": "NEKKO Jelly pate mèo combo 48 gói 70g",
+    "description": "Sản phẩm NEKKO Jelly pate mèo combo 48 gói 70g. Giá tham khảo từ Petmall, có thể thay đổi.",
+    "price": "956000.00",
+    "stock_quantity": 20,
+    "image_url": "https://cdn.hstatic.net/products/1000356051/800g_6188ee664d174a51996886028791de2e_small.png",
+    "status": "Đang bán",
+    "created_at": "2026-10-15T17:00:00.000Z"
+  },
+  {
+    "product_id": 4,
+    "category_id": 1,
+    "name": "CAT EYE thức ăn hạt cho mèo 1.5kg",
+    "description": "Sản phẩm CAT EYE thức ăn hạt cho mèo 1.5kg. Giá tham khảo từ Petmall, có thể thay đổi.",
+    "price": "199000.00",
+    "stock_quantity": 20,
+    "image_url": "https://product.hstatic.net/1000356051/product/petmall-1609-1-catseye-1.5kg_ef9b0aebe2a14cbda965c17928b30826_small.png",
+    "status": "Đang bán",
+    "created_at": "2026-10-15T17:00:00.000Z"
+  },
+  {
+    "product_id": 5,
+    "category_id": 1,
+    "name": "Tellme xúc xích thịt heo cà rốt cho chó 85g",
+    "description": "Sản phẩm Tellme xúc xích thịt heo cà rốt cho chó 85g. Giá tham khảo từ Petmall, có thể thay đổi.",
+    "price": "98000.00",
+    "stock_quantity": 20,
+    "image_url": "https://cdn.hstatic.net/products/1000356051/1_bec371cf3e434b0db0963c6d78e08cea_small.jpg",
+    "status": "Đang bán",
+    "created_at": "2026-10-15T17:00:00.000Z"
+  },
+  {
+    "product_id": 6,
+    "category_id": 1,
+    "name": "Tellme gan bò sấy cho chó mèo 75g",
+    "description": "Sản phẩm Tellme gan bò sấy cho chó mèo 75g. Giá tham khảo từ Petmall, có thể thay đổi.",
+    "price": "98000.00",
+    "stock_quantity": 20,
+    "image_url": "https://cdn.hstatic.net/products/1000356051/1_32962d311ddb41688b60ee57e76b291e_small.jpg",
+    "status": "Đang bán",
+    "created_at": "2026-10-15T17:00:00.000Z"
+  },
+  {
+    "product_id": 7,
+    "category_id": 1,
+    "name": "Tellme thanh gặm da heo cho chó 130g",
+    "description": "Sản phẩm Tellme thanh gặm da heo cho chó 130g. Giá tham khảo từ Petmall, có thể thay đổi.",
+    "price": "152000.00",
+    "stock_quantity": 20,
+    "image_url": "https://cdn.hstatic.net/products/1000356051/1_db49b56bcd054c7389aabd67596d013f_small.jpg",
+    "status": "Đang bán",
+    "created_at": "2026-10-15T17:00:00.000Z"
+  },
+  {
+    "product_id": 8,
+    "category_id": 1,
+    "name": "Nutrience Infusion Adult Small Breed thịt gà rau củ 2.27kg",
+    "description": "Sản phẩm Nutrience Infusion Adult Small Breed thịt gà rau củ 2.27kg. Giá tham khảo từ Petmall, có thể thay đổi.",
+    "price": "529339.00",
+    "stock_quantity": 20,
+    "image_url": "https://product.hstatic.net/1000356051/product/1_1c1df928af8340978c61cd0dab2520c1_small.png",
+    "status": "Đang bán",
+    "created_at": "2026-10-15T17:00:00.000Z"
+  },
+  {
+    "product_id": 9,
+    "category_id": 1,
+    "name": "Tellme Chicken Jerky gà sấy cho mèo 40g",
+    "description": "Sản phẩm Tellme Chicken Jerky gà sấy cho mèo 40g. Giá tham khảo từ Petmall, có thể thay đổi.",
+    "price": "98000.00",
+    "stock_quantity": 20,
+    "image_url": "https://cdn.hstatic.net/products/1000356051/1_4bf196151b844e1b88a39392ef133b06_small.jpg",
+    "status": "Đang bán",
+    "created_at": "2026-10-15T17:00:00.000Z"
+  },
+  {
+    "product_id": 10,
+    "category_id": 1,
+    "name": "Royal Canin Fussy Exigent cho mèo 2kg",
+    "description": "Sản phẩm Royal Canin Fussy Exigent cho mèo 2kg. Giá tham khảo từ Petmall, có thể thay đổi.",
+    "price": "723000.00",
+    "stock_quantity": 20,
+    "image_url": "https://cdn.hstatic.net/products/1000356051/2_510bbde86f0442faba988dc01c96cbad_small.jpg",
+    "status": "Đang bán",
+    "created_at": "2026-10-15T17:00:00.000Z"
+  },
+  {
+    "product_id": 11,
+    "category_id": 1,
+    "name": "KEOS+ Digestive Care Lamb & Rice cho chó 1.5kg",
+    "description": "Sản phẩm KEOS+ Digestive Care Lamb & Rice cho chó 1.5kg. Giá tham khảo từ Petmall, có thể thay đổi.",
+    "price": "165000.00",
+    "stock_quantity": 20,
+    "image_url": "https://cdn.hstatic.net/products/1000356051/3_01e8850069a44be6be46fd0edf5ca084_small.jpg",
+    "status": "Đang bán",
+    "created_at": "2026-10-15T17:00:00.000Z"
+  },
+  {
+    "product_id": 12,
+    "category_id": 2,
+    "name": "CattyMan Toys cần câu chuột lông thỏ đuôi dài",
+    "description": "Sản phẩm CattyMan Toys cần câu chuột lông thỏ đuôi dài. Giá tham khảo từ Petmall, có thể thay đổi.",
+    "price": "98000.00",
+    "stock_quantity": 20,
+    "image_url": "https://product.hstatic.net/1000356051/product/do_choi_can_cau_chuot_long_tho_duoi_dai_cattyman_01_0e2f161932fd468685e424c07be6812f_small.png",
+    "status": "Đang bán",
+    "created_at": "2026-10-15T17:00:00.000Z"
+  },
+  {
+    "product_id": 13,
+    "category_id": 2,
+    "name": "AFP Candy Parfum Toys đồ chơi chai nước hoa",
+    "description": "Sản phẩm AFP Candy Parfum Toys đồ chơi chai nước hoa. Giá tham khảo từ Petmall, có thể thay đổi.",
+    "price": "152000.00",
+    "stock_quantity": 20,
+    "image_url": "https://product.hstatic.net/1000356051/product/1_01dc99a2f5b2416486be1236bd42eb6e_small.png",
+    "status": "Đang bán",
+    "created_at": "2026-10-15T17:00:00.000Z"
+  },
+  {
+    "product_id": 14,
+    "category_id": 3,
+    "name": "Thùng đựng thức ăn Royal Canin 2kg hình mèo M2",
+    "description": "Sản phẩm Thùng đựng thức ăn Royal Canin 2kg hình mèo M2. Giá tham khảo từ Petmall, có thể thay đổi.",
+    "price": "213840.00",
+    "stock_quantity": 20,
+    "image_url": "https://cdn.hstatic.net/products/1000356051/800g_acd004ddff3a438bac46bcbd61f05cdb_small.jpg",
+    "status": "Đang bán",
+    "created_at": "2026-10-15T17:00:00.000Z"
+  },
+  {
+    "product_id": 15,
+    "category_id": 3,
+    "name": "Petsmix Scoop M2 xẻng vệ sinh mèo 13x16cm",
+    "description": "Sản phẩm Petsmix Scoop M2 xẻng vệ sinh mèo 13x16cm. Giá tham khảo từ Petmall, có thể thay đổi.",
+    "price": "121600.00",
+    "stock_quantity": 20,
+    "image_url": "https://product.hstatic.net/1000356051/product/4_11ec56be79ff4705862ec39e52996fa7_small.png",
+    "status": "Đang bán",
+    "created_at": "2026-10-15T17:00:00.000Z"
+  },
+  {
+    "product_id": 16,
+    "category_id": 4,
+    "name": "Kit Cat 5in1 Cat Wipes khăn ướt 80 miếng",
+    "description": "Sản phẩm Kit Cat 5in1 Cat Wipes khăn ướt 80 miếng. Giá tham khảo từ Petmall, có thể thay đổi.",
+    "price": "98000.00",
+    "stock_quantity": 20,
+    "image_url": "https://cdn.hstatic.net/products/1000356051/1_b51417d692704a2987777f8a566320c0_small.jpg",
+    "status": "Đang bán",
+    "created_at": "2026-10-15T17:00:00.000Z"
+  },
+  {
+    "product_id": 17,
+    "category_id": 4,
+    "name": "TropiClean Oral Care Clean Teeth gel răng miệng 59ml",
+    "description": "Sản phẩm TropiClean Oral Care Clean Teeth gel răng miệng 59ml. Giá tham khảo từ Petmall, có thể thay đổi.",
+    "price": "325000.00",
+    "stock_quantity": 20,
+    "image_url": "https://product.hstatic.net/1000356051/product/tropiclean_oral_care_clean_teeth_59ml__1__240803ed407b4d848e54136142fd6fcc_small.png",
+    "status": "Đang bán",
+    "created_at": "2026-10-15T17:00:00.000Z"
+  },
+  {
+    "product_id": 18,
+    "category_id": 4,
+    "name": "SONICE High Sided Scoop xẻng vệ sinh 21x10cm",
+    "description": "Sản phẩm SONICE High Sided Scoop xẻng vệ sinh 21x10cm. Giá tham khảo từ Petmall, có thể thay đổi.",
+    "price": "132000.00",
+    "stock_quantity": 20,
+    "image_url": "https://cdn.hstatic.net/products/1000356051/1_6a59f4d8b3c14481bff6b9e235016e0d_small.jpg",
+    "status": "Đang bán",
+    "created_at": "2026-10-15T17:00:00.000Z"
+  },
+  {
+    "product_id": 19,
+    "category_id": 5,
+    "name": "SHED-X dầu cá cho chó 473ml",
+    "description": "Sản phẩm SHED-X dầu cá cho chó 473ml. Giá tham khảo từ Petmall, có thể thay đổi.",
+    "price": "499000.00",
+    "stock_quantity": 20,
+    "image_url": "https://cdn.hstatic.net/products/1000356051/web_-_cho_lon_-_hinh_1_2c2cd255fb8d4341b9718eed704bfd76_pico.png",
+    "status": "Đang bán",
+    "created_at": "2026-10-15T17:00:00.000Z"
+  },
+  {
+    "product_id": 20,
+    "category_id": 5,
+    "name": "SHED-X dầu cá cho mèo 237ml",
+    "description": "Sản phẩm SHED-X dầu cá cho mèo 237ml. Giá tham khảo từ Petmall, có thể thay đổi.",
+    "price": "399000.00",
+    "stock_quantity": 20,
+    "image_url": "https://cdn.hstatic.net/products/1000356051/web_-_meo_-_hinh_1_1f8395560922437e959b294f50d5f9c6_pico.png",
+    "status": "Đang bán",
+    "created_at": "2026-10-15T17:00:00.000Z"
+  },
+  {
+    "product_id": 21,
+    "category_id": 5,
+    "name": "SHED-X dầu cá cho chó giống nhỏ 237ml",
+    "description": "Sản phẩm SHED-X dầu cá cho chó giống nhỏ 237ml. Giá tham khảo từ Petmall, có thể thay đổi.",
+    "price": "399000.00",
+    "stock_quantity": 20,
+    "image_url": "https://cdn.hstatic.net/products/1000356051/web_-_cho_con_-_hinh_1_abcb9a0a65e0475b8f7aa5514267148e_pico.png",
+    "status": "Đang bán",
+    "created_at": "2026-10-15T17:00:00.000Z"
+  }
+]

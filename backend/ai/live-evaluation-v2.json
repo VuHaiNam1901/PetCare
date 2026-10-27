@@ -1,0 +1,303 @@
+{
+  "version": 2,
+  "run_id": "015d3b44-8986-4f1a-8213-c070af83c8f6",
+  "model": "gemini-3.5-flash-lite",
+  "created_at": "2026-10-27T16:43:51.241Z",
+  "max_gemini_calls": 5,
+  "real_gemini_calls": 5,
+  "automatic_retries": 0,
+  "results": [
+    {
+      "turn": 1,
+      "question": "Shop có thức ăn cho mèo dưới 200k không?",
+      "manual_retry": false,
+      "http_status": 200,
+      "accepted": true,
+      "code": "OK",
+      "duration_ms": 8088,
+      "timings_ms": {
+        "mysql_products_ms": 4.009,
+        "context_history_ms": 2.728,
+        "mysql_history_load_ms": 2.317,
+        "gemini_ms": 7916.935,
+        "grounding_ms": 76.717,
+        "mysql_history_save_ms": 17.032,
+        "session_wait_ms": 10.54,
+        "mysql_session_ms": 1.27,
+        "mysql_ms": 24.627,
+        "processing_ms": 89.162,
+        "total_ms": 8041.264
+      },
+      "counts": {
+        "mysql_products_ms": 1,
+        "mysql_history_load_ms": 3,
+        "mysql_history_save_ms": 3,
+        "mysql_session_ms": 1,
+        "context_history_ms": 6,
+        "gemini_ms": 1,
+        "grounding_ms": 1,
+        "session_wait_ms": 2
+      },
+      "response": {
+        "message": "Chào bạn, cửa hàng có các sản phẩm thức ăn cho mèo nằm trong ngân sách bạn đã nêu. Bạn có thể tham khảo các lựa chọn bên dưới nhé.",
+        "products": [
+          {
+            "product_id": 1,
+            "category_id": 1,
+            "category_name": "Thức ăn thú cưng",
+            "name": "ME-O Tuna - Thức ăn hạt cho mèo vị cá ngừ 1.2kg",
+            "price": "152900.00",
+            "stock_quantity": 30,
+            "image_url": "/images/products/1-me-o-tuna-thuc-an-hat-cho-meo-vi-ca-ngu-1-2kg.webp",
+            "status": "Đang bán",
+            "available": true,
+            "source": "MySQL"
+          },
+          {
+            "product_id": 4,
+            "category_id": 1,
+            "category_name": "Thức ăn thú cưng",
+            "name": "CAT EYE thức ăn hạt cho mèo 1.5kg",
+            "price": "199000.00",
+            "stock_quantity": 20,
+            "image_url": "/images/products/4-cat-eye-thuc-an-hat-cho-meo-1-5kg.webp",
+            "status": "Đang bán",
+            "available": true,
+            "source": "MySQL"
+          },
+          {
+            "product_id": 3,
+            "category_id": 1,
+            "category_name": "Thức ăn thú cưng",
+            "name": "NEKKO Jelly pate mèo 70g",
+            "price": "18000.00",
+            "stock_quantity": 20,
+            "image_url": "/images/products/3-nekko-jelly-pate-meo-70g.webp",
+            "status": "Đang bán",
+            "available": true,
+            "source": "MySQL"
+          }
+        ],
+        "follow_up": "Bạn muốn tìm loại thức ăn dạng hạt hay pate cho bé nhà mình?",
+        "warnings": [],
+        "code": "OK",
+        "model": "gemini-3.5-flash-lite",
+        "intent": "product_search",
+        "mode": "product",
+        "care_advice": []
+      }
+    },
+    {
+      "turn": 2,
+      "question": "Trong những loại đó, loại nào rẻ nhất?",
+      "manual_retry": false,
+      "http_status": 200,
+      "accepted": true,
+      "code": "OK",
+      "duration_ms": 11562,
+      "timings_ms": {
+        "mysql_products_ms": 1.27,
+        "context_history_ms": 1.036,
+        "mysql_history_load_ms": 1.206,
+        "gemini_ms": 11476.297,
+        "grounding_ms": 45.405,
+        "mysql_history_save_ms": 15.922,
+        "session_wait_ms": 0.7,
+        "mysql_session_ms": 0.47,
+        "mysql_ms": 18.869,
+        "processing_ms": 48.82,
+        "total_ms": 11544.687
+      },
+      "counts": {
+        "mysql_products_ms": 1,
+        "mysql_history_load_ms": 3,
+        "mysql_history_save_ms": 3,
+        "mysql_session_ms": 1,
+        "context_history_ms": 6,
+        "gemini_ms": 1,
+        "grounding_ms": 1,
+        "session_wait_ms": 2
+      },
+      "response": {
+        "message": "Lựa chọn đầu tiên trong danh sách là sản phẩm có mức giá tiết kiệm nhất trong ngân sách bạn đã nêu. Bạn có thể xem thông tin chi tiết của sản phẩm này ở thẻ bên dưới nhé.",
+        "products": [
+          {
+            "product_id": 3,
+            "category_id": 1,
+            "category_name": "Thức ăn thú cưng",
+            "name": "NEKKO Jelly pate mèo 70g",
+            "price": "18000.00",
+            "stock_quantity": 20,
+            "image_url": "/images/products/3-nekko-jelly-pate-meo-70g.webp",
+            "status": "Đang bán",
+            "available": true,
+            "source": "MySQL"
+          }
+        ],
+        "follow_up": "Bạn có muốn xem thêm các loại hương vị khác của dòng sản phẩm này không?",
+        "warnings": [],
+        "code": "OK",
+        "model": "gemini-3.5-flash-lite",
+        "intent": "follow_up",
+        "mode": "product",
+        "care_advice": []
+      }
+    },
+    {
+      "turn": 3,
+      "question": "Loại đó có phù hợp với mèo 6 tháng tuổi không?",
+      "manual_retry": false,
+      "http_status": 200,
+      "accepted": false,
+      "code": "GROUNDING_REJECTED",
+      "duration_ms": 8962,
+      "timings_ms": {
+        "mysql_products_ms": 4.975,
+        "context_history_ms": 3.275,
+        "mysql_history_load_ms": 1.591,
+        "gemini_ms": 8853.008,
+        "grounding_ms": 59.889,
+        "mysql_history_save_ms": 16.94,
+        "session_wait_ms": 0.831,
+        "mysql_session_ms": 0.506,
+        "mysql_ms": 24.012,
+        "processing_ms": 68.54,
+        "total_ms": 8946.392
+      },
+      "counts": {
+        "mysql_products_ms": 1,
+        "mysql_history_load_ms": 3,
+        "mysql_history_save_ms": 3,
+        "mysql_session_ms": 1,
+        "context_history_ms": 6,
+        "gemini_ms": 1,
+        "grounding_ms": 1,
+        "session_wait_ms": 2
+      },
+      "rejection_code": "UNVERIFIED_SUITABILITY_OR_MEDICAL_ADVICE"
+    },
+    {
+      "turn": 4,
+      "question": "Chăm sóc vệ sinh bát ăn của mèo hằng ngày thế nào cho hợp lý?",
+      "manual_retry": false,
+      "http_status": 200,
+      "accepted": true,
+      "code": "OK",
+      "duration_ms": 9158,
+      "timings_ms": {
+        "mysql_products_ms": 0,
+        "context_history_ms": 1.142,
+        "mysql_history_load_ms": 1.158,
+        "gemini_ms": 9076.59,
+        "grounding_ms": 35.483,
+        "mysql_history_save_ms": 14.25,
+        "session_wait_ms": 0.712,
+        "mysql_session_ms": 0.302,
+        "mysql_ms": 15.709,
+        "processing_ms": 37.363,
+        "total_ms": 9130.374
+      },
+      "counts": {
+        "mysql_products_ms": 0,
+        "mysql_history_load_ms": 3,
+        "mysql_history_save_ms": 3,
+        "mysql_session_ms": 1,
+        "context_history_ms": 5,
+        "gemini_ms": 1,
+        "grounding_ms": 1,
+        "session_wait_ms": 2
+      },
+      "response": {
+        "message": "Bạn nên rửa sạch bát ăn của mèo hằng ngày bằng nước ấm và xà phòng chuyên dụng, sau đó tráng lại thật kỹ để loại bỏ cặn thức ăn và vi khuẩn. Ngoài ra, việc dùng bát bằng inox hoặc sứ thay cho bát nhựa sẽ giúp hạn chế tích tụ vi khuẩn gây mụn trứng cá ở cằm mèo đấy.",
+        "products": [],
+        "follow_up": "Bé mèo nhà bạn thường thích ăn thức ăn hạt khô hay pate hơn?",
+        "warnings": [],
+        "code": "OK",
+        "model": "gemini-3.5-flash-lite",
+        "intent": "care",
+        "mode": "care",
+        "care_advice": [
+          {
+            "source": "general_knowledge",
+            "text": "Bạn nên rửa sạch bát ăn của mèo hằng ngày bằng nước ấm và xà phòng chuyên dụng, sau đó tráng lại thật kỹ để loại bỏ cặn thức ăn và vi khuẩn. Ngoài ra, việc dùng bát bằng inox hoặc sứ thay cho bát nhựa sẽ giúp hạn chế tích tụ vi khuẩn gây mụn trứng cá ở cằm mèo đấy."
+          }
+        ]
+      }
+    },
+    {
+      "turn": 3,
+      "question": "Loại đó có phù hợp với mèo 6 tháng tuổi không?",
+      "manual_retry": true,
+      "http_status": 200,
+      "accepted": true,
+      "code": "OK",
+      "duration_ms": 1725,
+      "timings_ms": {
+        "mysql_products_ms": 4.423,
+        "context_history_ms": 3.486,
+        "mysql_history_load_ms": 3.208,
+        "gemini_ms": 1610.666,
+        "grounding_ms": 41.749,
+        "mysql_history_save_ms": 7.694,
+        "session_wait_ms": 10.077,
+        "mysql_session_ms": 0.807,
+        "mysql_ms": 16.134,
+        "processing_ms": 52.662,
+        "total_ms": 1689.538
+      },
+      "counts": {
+        "mysql_products_ms": 1,
+        "mysql_history_load_ms": 3,
+        "mysql_history_save_ms": 3,
+        "mysql_session_ms": 1,
+        "context_history_ms": 6,
+        "gemini_ms": 1,
+        "grounding_ms": 1,
+        "session_wait_ms": 2
+      },
+      "response": {
+        "message": "Hiện dữ liệu cửa hàng chưa đủ thông tin để xác nhận sản phẩm có phù hợp với mèo 6 tháng tuổi hay không. Bạn vui lòng kiểm tra kỹ thông tin trên nhãn sản phẩm hoặc hỏi bác sĩ thú y để được tư vấn chính xác nhé.",
+        "products": [],
+        "follow_up": "Bạn có cần tư vấn thêm về các sản phẩm khác không?",
+        "warnings": [],
+        "code": "OK",
+        "model": "gemini-3.5-flash-lite",
+        "intent": "follow_up",
+        "mode": "product",
+        "care_advice": []
+      }
+    }
+  ],
+  "restart": {
+    "performed": true,
+    "between_turns": [
+      2,
+      3
+    ],
+    "child_process_changed": true,
+    "persisted_rows_before": 4,
+    "persisted_rows_after": 4,
+    "replay_ok": true,
+    "replay_spent_calls": 0,
+    "replay_duration_ms": 40,
+    "replay_timings_ms": {
+      "mysql_products_ms": 0,
+      "context_history_ms": 0,
+      "mysql_history_load_ms": 1.419,
+      "gemini_ms": 0,
+      "grounding_ms": 0,
+      "mysql_history_save_ms": 0,
+      "session_wait_ms": 9.628,
+      "mysql_session_ms": 0.572,
+      "mysql_ms": 1.991,
+      "processing_ms": 4.319,
+      "total_ms": 15.938
+    }
+  },
+  "test_histories_cleaned": true,
+  "catalog_unchanged": true,
+  "catalog_hash_before": "f4c94c64ceace27dd884f11f7ae53409574edd1efbc76516d1d2924fa4c3a0a3",
+  "updated_at": "2026-10-27T16:50:12.759Z",
+  "stop_code": "COMPLETE",
+  "catalog_hash_after": "f4c94c64ceace27dd884f11f7ae53409574edd1efbc76516d1d2924fa4c3a0a3"
+}

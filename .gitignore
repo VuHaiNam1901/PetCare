@@ -426,3 +426,15 @@ FodyWeavers.xsd
 
 # Official VS Code C# Dev Kit Extension exclusion
 #*.lscache
+
+# PetCare Node.js: local secrets and reproducible output
+.env
+.env.*
+!.env.example
+node_modules/
+dist/
+test-results/
+playwright-report/
+coverage/
+backups/
+*.log

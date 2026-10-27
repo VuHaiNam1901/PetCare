@@ -1,0 +1,85 @@
+{
+  "model": "gemini-3.5-flash-lite",
+  "created_at": "2026-10-27T14:54:48.042Z",
+  "real_gemini_calls": 3,
+  "results": [
+    {
+      "question": "Shop có thức ăn cho mèo dưới 200k không?",
+      "http_status": 200,
+      "code": "GROUNDING_REJECTED",
+      "intent": "product_search",
+      "duration_ms": 4066,
+      "message": "Mình chưa thể xác nhận gợi ý vừa nhận được. Bạn cho biết rõ hơn nhu cầu để mình đối chiếu lại với dữ liệu cửa hàng nhé.",
+      "follow_up": "Bạn muốn tìm loại sản phẩm nào và khoảng ngân sách bao nhiêu?",
+      "warnings": [],
+      "products": []
+    },
+    {
+      "question": "Shop có thức ăn cho mèo dưới 200k không?",
+      "http_status": 200,
+      "code": "GROUNDING_REJECTED",
+      "intent": "product_search",
+      "duration_ms": 21334,
+      "message": "Mình chưa thể xác nhận gợi ý vừa nhận được. Bạn cho biết rõ hơn nhu cầu để mình đối chiếu lại với dữ liệu cửa hàng nhé.",
+      "follow_up": "Bạn muốn tìm loại sản phẩm nào và khoảng ngân sách bao nhiêu?",
+      "warnings": [],
+      "products": [],
+      "validation_issue": "Generated commercial facts",
+      "model_output": {
+        "advice": "Dạ nhà mình có nhiều loại thức ăn cho mèo dưới 200k rất phù hợp để boss nhâm nhi mỗi ngày ạ. Bạn có thể tham khảo các lựa chọn bên dưới nhé.",
+        "product_ids": [
+          1,
+          4,
+          3
+        ],
+        "follow_up": "Bé nhà bạn thích ăn hạt khô hay pate hơn vậy ạ?",
+        "warnings": []
+      }
+    },
+    {
+      "question": "Shop có thức ăn cho mèo dưới 200k không?",
+      "http_status": 200,
+      "code": "OK",
+      "intent": "product_search",
+      "duration_ms": 30866,
+      "message": "Chào bạn, cửa hàng có nhiều loại thức ăn cho mèo phù hợp trong ngân sách bạn đã nêu. Bạn có thể tham khảo các lựa chọn bên dưới nhé.",
+      "follow_up": "Bạn muốn tìm thức ăn dạng hạt hay pate cho bé mèo nhà mình?",
+      "warnings": [],
+      "products": [
+        {
+          "product_id": 1,
+          "name": "ME-O Tuna - Thức ăn hạt cho mèo vị cá ngừ 1.2kg",
+          "price": "152900.00",
+          "stock_quantity": 30,
+          "available": true
+        },
+        {
+          "product_id": 4,
+          "name": "CAT EYE thức ăn hạt cho mèo 1.5kg",
+          "price": "199000.00",
+          "stock_quantity": 20,
+          "available": true
+        },
+        {
+          "product_id": 3,
+          "name": "NEKKO Jelly pate mèo 70g",
+          "price": "18000.00",
+          "stock_quantity": 20,
+          "available": true
+        }
+      ],
+      "model_output": {
+        "advice": "Chào bạn, cửa hàng có nhiều loại thức ăn cho mèo phù hợp trong ngân sách bạn đã nêu. Bạn có thể tham khảo các lựa chọn bên dưới nhé.",
+        "product_ids": [
+          1,
+          4,
+          3
+        ],
+        "follow_up": "Bạn muốn tìm thức ăn dạng hạt hay pate cho bé mèo nhà mình?",
+        "warnings": []
+      }
+    }
+  ],
+  "catalog_unchanged": true,
+  "test_histories_cleaned": true
+}
