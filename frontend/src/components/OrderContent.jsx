@@ -14,12 +14,20 @@ export function OrderStatusBadge({ status, order, className = '' }) {
   return <span className={`my-order-status is-${label === 'Chờ duyệt' ? 'pending' : statusTones[value] || 'unknown'} ${className}`}><span aria-hidden="true" />{label}</span>;
 }
 
-const historyActions = { created: 'Đặt hàng', approve: 'Duyệt đơn', reject: 'Từ chối đơn', status: 'Cập nhật giao hàng', payment: 'Ghi nhận thanh toán', payment_failed: 'Thanh toán chưa thành công' };
+const historyActions = {
+  created: 'Đặt hàng',
+  approve: 'Duyệt đơn',
+  reject: 'Từ chối đơn',
+  status: 'Cập nhật giao hàng',
+  payment: 'Ghi nhận thanh toán',
+  payment_failed: 'Thanh toán chưa thành công',
+  payment_expired: 'Hủy do quá hạn thanh toán',
+};
 
 export function OrderHistory({ history = [] }) {
   const entries = Array.isArray(history) ? history : [];
   return <section className="order-history" aria-label="Lịch sử trạng thái đơn hàng"><h2>Lịch sử trạng thái</h2>
-    {entries.length ? <ol>{entries.map((entry, index) => {
+    {entries.length ? <ol role="list">{entries.map((entry, index) => {
       const date = formatOrderDate(entry.created_at, true);
       return <li key={entry.history_id || index} data-history-id={entry.history_id}>
         <div className="order-history-heading"><strong>{historyActions[entry.action] || 'Cập nhật trạng thái'}</strong>{date && <time dateTime={entry.created_at}>{date}</time>}</div>
@@ -32,7 +40,7 @@ export function OrderHistory({ history = [] }) {
 }
 
 export function OrderItems({ items, orderId, className = '', itemClassName = '' }) {
-  return <ul className={`my-order-items ${className}`} aria-label={`Sản phẩm đơn hàng ${orderId}`}>
+  return <ul role="list" className={`my-order-items ${className}`} aria-label={`Sản phẩm đơn hàng ${orderId}`}>
     {items.map(item => {
       const source = resolveImageUrl(item.image_url);
       return <li className={`my-order-item ${itemClassName}`} key={item.order_detail_id || item.product_id} data-product-id={item.product_id}>

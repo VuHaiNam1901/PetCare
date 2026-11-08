@@ -25,14 +25,27 @@ export function orderFixture(orderId, owner = 'a', changes = {}) {
 }
 
 export function paymentFixture(order, changes = {}) {
+  const isV2 = order.workflow_version === 2;
+  const windowOpen = order.payment_window_open ?? true;
+  const canSimulate = isV2
+    ? order.payment_method === 'ONLINE' && !order.approved_at && order.status === 'Chờ thanh toán'
+      && ['Chưa thanh toán', 'Thất bại'].includes(order.payment_status) && !order.transaction_date && windowOpen
+    : order.payment_method === 'ONLINE' && Boolean(order.approved_at) && order.status === 'Chờ thanh toán'
+      && ['Chưa thanh toán', 'Thất bại'].includes(order.payment_status) && !order.transaction_date;
   return {
     payment_id: order.order_id, order_id: order.order_id,
     payment_method: order.payment_method, payment_status: order.payment_status,
     amount: order.payment_amount || order.total_amount, transaction_date: order.transaction_date || null,
     created_at: order.order_date, order_status: order.status, approved_at: order.approved_at,
-    can_simulate: order.payment_method === 'ONLINE' && Boolean(order.approved_at) && order.status === 'Chờ thanh toán'
-      && ['Chưa thanh toán', 'Thất bại'].includes(order.payment_status) && !order.transaction_date,
+    can_simulate: canSimulate,
     simulation_only: true,
+    ...(isV2 ? {
+      workflow_version: 2,
+      payment_expires_at: order.payment_expires_at ?? '2026-11-01T08:15:00.000Z',
+      approval_state: order.approval_state,
+      rejection_reason: order.rejection_reason ?? null,
+      refunds: order.refunds ?? [],
+    } : {}),
     ...changes,
   };
 }

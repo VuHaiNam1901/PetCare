@@ -4,12 +4,36 @@ import { useCommerce } from '../context/CommerceContext.jsx';
 import { ErrorNotice } from '../components/Feedback.jsx';
 import { OrderHistory, OrderItems, OrderStatusBadge, OrdersLoading } from '../components/OrderContent.jsx';
 import OrderReviewLinks from '../components/OrderReviewLinks.jsx';
-import { formatPrice } from '../utils/catalog.js';
-import { formatOrderDate, orderStatusLabel, recordedDate } from '../utils/orders.js';
+import { formatOrderDate, formatOrderMoney, orderStatusLabel, recordedDate } from '../utils/orders.js';
 import { safeReturnUrl } from '../utils/auth-navigation.js';
 import { BRAND_NAME } from '../config/branding.js';
 import '../my-orders.css';
 import '../order-detail.css';
+
+const refundStatusLabels = {
+  requested: 'Chờ xử lý hoàn tiền',
+  submitted: 'Đã gửi yêu cầu hoàn tiền',
+  processing: 'Đang xử lý hoàn tiền',
+  succeeded: 'Đã hoàn tiền',
+  failed: 'Hoàn tiền thất bại',
+  unknown: 'Chưa xác định kết quả hoàn tiền',
+  manual_review: 'Cần đối soát hoàn tiền',
+};
+
+const refundReasonLabels = {
+  admin_rejected: 'Đơn hàng bị từ chối sau khi đã thanh toán.',
+  late_capture: 'Giao dịch ghi nhận sau hạn thanh toán.',
+  cancelled_order: 'Giao dịch ghi nhận trên đơn đã hủy.',
+  excess_capture: 'Giao dịch thu dư hoặc thu trùng cần hoàn lại.',
+  amount_mismatch: 'Số tiền giao dịch không khớp đơn hàng.',
+  manual_review: 'Giao dịch cần cửa hàng kiểm tra thủ công.',
+};
+
+function refundTone(status) {
+  if (status === 'succeeded') return 'succeeded';
+  if (['failed', 'unknown', 'manual_review'].includes(status)) return 'attention';
+  return 'pending';
+}
 
 function RecordedTime({ value }) {
   const label = formatOrderDate(value, true);
@@ -17,47 +41,103 @@ function RecordedTime({ value }) {
 }
 
 function OrderProgress({ order }) {
+  const isV2 = order.workflow_version === 2;
   const cancelled = order.status === 'Đã hủy';
   const rejected = order.approval_state === 'rejected' || Boolean(order.rejection_reason);
-  const pending = orderStatusLabel(order) === 'Chờ duyệt';
-  const stages = ['Chờ duyệt', ...(order.payment_method === 'ONLINE' ? ['Chờ thanh toán'] : []), 'Chờ giao hàng', 'Đang giao hàng', 'Đã giao hàng'];
-  const activeIndex = pending ? 0 : order.approval_state === 'legacy' ? -1 : stages.indexOf(order.status);
+  const expired = isV2 && order.cancellation_reason_code === 'payment_expired';
+  const stages = isV2
+    ? ['Chờ thanh toán', 'Chờ duyệt', 'Chờ giao hàng', 'Đang giao hàng', 'Đã giao hàng']
+    : ['Chờ duyệt', ...(order.payment_method === 'ONLINE' ? ['Chờ thanh toán'] : []), 'Chờ giao hàng', 'Đang giao hàng', 'Đã giao hàng'];
+  const currentStage = order.approval_state === 'legacy' ? null : orderStatusLabel(order);
+  const activeIndex = currentStage ? stages.indexOf(currentStage) : -1;
+  const hasRecordedTimes = (cancelled && Boolean(recordedDate(order.order_date))) ||
+    Boolean(recordedDate(order.approved_at)) || Boolean(recordedDate(order.transaction_date));
+
   return <section className="order-detail-card order-detail-progress" aria-labelledby="order-progress-title">
     <div className="order-detail-section-heading"><Truck size={20} aria-hidden="true" /><h2 id="order-progress-title">Theo dõi đơn hàng</h2></div>
-    {cancelled ? <div className="order-detail-cancelled" role="status"><CircleX size={26} aria-hidden="true" /><div><h3>{rejected ? 'Đơn hàng đã bị từ chối' : 'Đơn hàng đã hủy'}</h3><p>Tiến trình giao hàng đã dừng. Vui lòng liên hệ cửa hàng nếu bạn cần thêm thông tin.</p></div></div>
+    {cancelled ? <div className="order-detail-cancelled" role="status"><CircleX size={26} aria-hidden="true" /><div><h3>{rejected ? 'Đơn hàng đã bị từ chối' : expired ? 'Đơn hàng đã hủy do quá hạn thanh toán' : 'Đơn hàng đã hủy'}</h3><p>{expired ? 'Đơn Online đã quá thời hạn thanh toán 24 giờ nên tiến trình xử lý đã dừng. Hàng giữ chỗ và ưu đãi (nếu có) đã được hoàn lại.' : 'Tiến trình giao hàng đã dừng. Vui lòng liên hệ cửa hàng nếu bạn cần thêm thông tin.'}</p></div></div>
       : activeIndex < 0 ? <p className="order-detail-muted">Trạng thái hiện tại: {order.status || 'Chưa có thông tin'}. Chưa có tiến trình tương ứng để hiển thị.</p>
-        : <ol className="order-detail-steps" aria-label="Tiến trình đơn hàng">
+        : <ol role="list" className="order-detail-steps" aria-label="Tiến trình đơn hàng">
           <li className="is-complete"><span className="order-detail-step-dot"><Check size={15} aria-hidden="true" /></span><div><strong>Đã đặt hàng</strong><RecordedTime value={order.order_date} /></div></li>
           {stages.map((stage, index) => <li key={stage} className={index < activeIndex ? 'is-complete' : index === activeIndex ? 'is-current' : ''} aria-current={index === activeIndex ? 'step' : undefined}><span className="order-detail-step-dot">{index < activeIndex ? <Check size={15} aria-hidden="true" /> : <span aria-hidden="true" />}</span><div><strong>{stage}</strong></div></li>)}
         </ol>}
-    <dl className="order-detail-recorded-times">
+    {hasRecordedTimes && <dl className="order-detail-recorded-times">
       {cancelled && recordedDate(order.order_date) && <div><dt>Ngày đặt</dt><dd><RecordedTime value={order.order_date} /></dd></div>}
       {recordedDate(order.approved_at) && <div><dt>Cửa hàng duyệt đơn</dt><dd><RecordedTime value={order.approved_at} /></dd></div>}
       {recordedDate(order.transaction_date) && <div><dt>Ghi nhận thanh toán</dt><dd><RecordedTime value={order.transaction_date} /></dd></div>}
-    </dl>
+    </dl>}
     <p className="order-detail-progress-note"><Info size={14} aria-hidden="true" />Tiến trình phản ánh trạng thái hiện tại. Chỉ hiển thị ngày giờ đã được ghi nhận.</p>
   </section>;
 }
 
 function PaymentDetails({ order, state, onRetry }) {
   const payment = state?.value;
+  const isV2 = order.workflow_version === 2;
   const method = order.payment_method === 'COD' ? 'Thanh toán khi nhận hàng (COD)' : order.payment_method === 'ONLINE' ? 'Thanh toán Online' : 'Chưa có thông tin';
   const cancelled = order.status === 'Đã hủy' || order.payment_status === 'Đã hủy';
+  const refunds = isV2 && Array.isArray(order.refunds) ? order.refunds : [];
   let notice;
-  if (cancelled) notice = 'Đơn hàng đã hủy. Không có thao tác thanh toán trên trang này.';
-  else if (order.payment_status === 'Đã thanh toán') notice = 'Thanh toán đã được ghi nhận theo thông tin của đơn hàng.';
-  else if (order.payment_method === 'COD') notice = 'Bạn thanh toán khi nhận hàng. Trạng thái thu tiền được cập nhật từ cửa hàng.';
-  else if (order.payment_method === 'ONLINE' && payment) {
-    if (!payment.approved_at) notice = 'Đơn hàng cần được Admin duyệt trước khi thanh toán.';
-    else if (payment.can_simulate === true && payment.simulation_only === true) notice = 'Đơn hàng đã được Admin duyệt và có thể thanh toán mô phỏng. Giao diện thanh toán chưa được tích hợp.';
-    else notice = 'Đơn hàng hiện chưa thể thanh toán. Vui lòng cập nhật trạng thái hoặc liên hệ cửa hàng. Giao diện thanh toán chưa được tích hợp.';
+  if (cancelled) {
+    if (isV2 && order.payment_status === 'Đã thanh toán') {
+      notice = 'Đơn hàng đã bị từ chối sau khi ghi nhận thanh toán. Trạng thái xử lý hoàn tiền được hiển thị bên dưới; không có thao tác thanh toán trên trang này.';
+    } else if (isV2 && order.cancellation_reason_code === 'payment_expired') {
+      notice = 'Đơn hàng đã quá thời hạn thanh toán 24 giờ và đã tự động hủy. Không có thao tác thanh toán trên trang này.';
+    } else {
+      notice = 'Đơn hàng đã hủy. Không có thao tác thanh toán trên trang này.';
+    }
+  } else if (order.payment_status === 'Đã thanh toán') {
+    notice = isV2 && !order.approved_at && order.status === 'Chờ xử lý'
+      ? 'Thanh toán đã được ghi nhận. Đơn hàng đang chờ cửa hàng duyệt trước khi chuẩn bị giao.'
+      : 'Thanh toán đã được ghi nhận theo thông tin của đơn hàng.';
+  } else if (order.payment_method === 'COD') {
+    notice = 'Bạn thanh toán khi nhận hàng. Trạng thái thu tiền được cập nhật từ cửa hàng.';
+  } else if (order.payment_method === 'ONLINE' && payment) {
+    if (isV2) {
+      const failedPrefix = order.payment_status === 'Thất bại' ? 'Lần thanh toán gần nhất chưa thành công. ' : '';
+      if (payment.can_simulate === true && payment.simulation_only === true) {
+        notice = `${failedPrefix}Đơn Online được thanh toán trước khi Admin duyệt và có thể thanh toán mô phỏng trong môi trường kiểm thử. Giao diện thanh toán chưa được tích hợp.`;
+      } else {
+        notice = `${failedPrefix}Đơn Online được thanh toán trước khi Admin duyệt trong thời hạn quy định. Hiện cổng thanh toán trực tuyến và giao diện thanh toán chưa được tích hợp.`;
+      }
+    } else if (!payment.approved_at) {
+      notice = 'Đơn hàng cần được Admin duyệt trước khi thanh toán.';
+    } else if (payment.can_simulate === true && payment.simulation_only === true) {
+      notice = 'Đơn hàng đã được Admin duyệt và có thể thanh toán mô phỏng. Giao diện thanh toán chưa được tích hợp.';
+    } else {
+      notice = 'Đơn hàng hiện chưa thể thanh toán. Vui lòng cập nhật trạng thái hoặc liên hệ cửa hàng. Giao diện thanh toán chưa được tích hợp.';
+    }
   }
   return <section className="order-detail-card order-detail-payment" aria-labelledby="order-payment-title">
     <div className="order-detail-section-heading"><CreditCard size={20} aria-hidden="true" /><h2 id="order-payment-title">Thông tin thanh toán</h2></div>
-    <dl className="order-detail-data"><div><dt>Phương thức</dt><dd>{method}</dd></div><div><dt>Trạng thái thanh toán</dt><dd className="order-detail-payment-status">{order.payment_status || 'Chưa có thông tin'}</dd></div>{recordedDate(order.transaction_date) && <div><dt>Thời gian ghi nhận</dt><dd><RecordedTime value={order.transaction_date} /></dd></div>}</dl>
+    <dl className="order-detail-data">
+      <div><dt>Phương thức</dt><dd>{method}</dd></div>
+      <div><dt>Trạng thái thanh toán</dt><dd className="order-detail-payment-status">{order.payment_status || 'Chưa có thông tin'}</dd></div>
+      {isV2 && recordedDate(order.payment_expires_at) && <div><dt>Hạn thanh toán</dt><dd><RecordedTime value={order.payment_expires_at} /></dd></div>}
+      {recordedDate(order.transaction_date) && <div><dt>Thời gian ghi nhận</dt><dd><RecordedTime value={order.transaction_date} /></dd></div>}
+    </dl>
     {(!state || state.loading) && <p className="order-detail-payment-loading" role="status">Đang kiểm tra thông tin thanh toán...</p>}
     {state?.error ? <div className="order-detail-payment-error"><ErrorNotice title="Chưa kiểm tra được thanh toán" message={state.error} onRetry={onRetry} /></div> : notice && <div className="order-detail-payment-note" role="status"><Info size={16} aria-hidden="true" /><p>{notice}</p></div>}
-    {order.payment_method === 'ONLINE' && !cancelled && order.payment_status !== 'Đã thanh toán' && <p className="order-detail-muted">Thanh toán Online hiện chỉ có mô phỏng, chưa kết nối cổng thanh toán thật. Xem đơn không thực hiện thanh toán.</p>}
+    {refunds.length > 0 && <div className="order-detail-refund-block">
+      <h3 className="order-detail-subheading">Thông tin hoàn tiền</h3>
+      <ul role="list" className="order-detail-refunds" aria-label="Danh sách yêu cầu hoàn tiền">
+        {refunds.map((refund, index) => {
+          const amountLabel = refund.currency && refund.currency !== 'VND' ? `${refund.amount} ${refund.currency}` : formatOrderMoney(refund.amount, true);
+          return <li key={refund.refund_id || index} className={`order-detail-refund is-${refundTone(refund.status)}`} data-refund-id={refund.refund_id}>
+            <div className="order-detail-refund-heading">
+              <strong>{refundStatusLabels[refund.status] || 'Đang cập nhật hoàn tiền'}</strong>
+              <span>{amountLabel}</span>
+            </div>
+            {refundReasonLabels[refund.reason_code] && <p>{refundReasonLabels[refund.reason_code]}</p>}
+            <div className="order-detail-refund-times">
+              {recordedDate(refund.requested_at_utc) && <span>Ghi nhận yêu cầu: <RecordedTime value={refund.requested_at_utc} /></span>}
+              {refund.status === 'succeeded' && recordedDate(refund.confirmed_at_utc) && <span>Hoàn tất hoàn tiền: <RecordedTime value={refund.confirmed_at_utc} /></span>}
+            </div>
+          </li>;
+        })}
+      </ul>
+      {refunds.some(refund => refund.status !== 'succeeded') && <p className="order-detail-muted">Yêu cầu hoàn tiền chỉ hoàn tất khi cổng thanh toán xác nhận trạng thái Đã hoàn tiền.</p>}
+    </div>}
+    {order.payment_method === 'ONLINE' && !cancelled && order.payment_status !== 'Đã thanh toán' && <p className="order-detail-muted">{isV2 ? 'Cổng thanh toán trực tuyến chưa được kết nối trên giao diện khách hàng. Xem đơn không thực hiện thanh toán.' : 'Thanh toán Online hiện chỉ có mô phỏng, chưa kết nối cổng thanh toán thật. Xem đơn không thực hiện thanh toán.'}</p>}
   </section>;
 }
 
@@ -77,10 +157,20 @@ export default function OrderDetailPage({ orderId }) {
   const payment = paymentState?.value;
   // The payment GET reads order/payment state atomically. Prefer that newer state
   // while retaining the immutable shipping/items/amount from the detail snapshot.
-  const order = originalOrder && payment ? { ...originalOrder, status: payment.order_status,
-    payment_status: payment.payment_status, approved_at: payment.approved_at, transaction_date: payment.transaction_date,
+  const order = originalOrder && payment ? {
+    ...originalOrder,
+    status: payment.order_status,
+    payment_status: payment.payment_status,
+    approved_at: payment.approved_at,
+    transaction_date: payment.transaction_date,
     approval_state: payment.approval_state ?? originalOrder.approval_state,
-    rejection_reason: payment.rejection_reason ?? originalOrder.rejection_reason } : originalOrder;
+    rejection_reason: payment.rejection_reason ?? originalOrder.rejection_reason,
+    workflow_version: payment.workflow_version ?? originalOrder.workflow_version,
+    payment_expires_at: payment.payment_expires_at ?? originalOrder.payment_expires_at,
+    cancellation_reason_code: payment.cancellation_reason_code ?? originalOrder.cancellation_reason_code,
+    refunds: Array.isArray(payment.refunds) ? payment.refunds : originalOrder.refunds,
+  } : originalOrder;
+  const hasVoucher = Boolean(order?.voucher_code_snapshot) || (order?.discount_amount != null && Number(order.discount_amount) > 0);
   const loading = authLoading || !current || current.loading;
 
   useEffect(() => {
@@ -105,7 +195,12 @@ export default function OrderDetailPage({ orderId }) {
       if (!alive) return;
       const value = data.order;
       if (!value || value.user_id !== ownerId || value.order_id !== id || !Array.isArray(value.items) ||
-        typeof value.total_amount !== 'string' || value.items.some(item => !item || !Number.isSafeInteger(item.product_id) || !Number.isSafeInteger(item.quantity) || item.quantity <= 0)) {
+        typeof value.total_amount !== 'string' || (value.workflow_version != null && value.workflow_version !== 2) ||
+        (value.subtotal_amount != null && typeof value.subtotal_amount !== 'string') ||
+        (value.discount_amount != null && typeof value.discount_amount !== 'string') ||
+        (value.voucher_code_snapshot != null && typeof value.voucher_code_snapshot !== 'string') ||
+        (value.refunds != null && !Array.isArray(value.refunds)) ||
+        value.items.some(item => !item || !Number.isSafeInteger(item.product_id) || !Number.isSafeInteger(item.quantity) || item.quantity <= 0)) {
         throw new Error('Dữ liệu đơn hàng chưa hợp lệ. Vui lòng thử lại.');
       }
       setResult({ ownerId, orderId: id, loading: false, order: value, error: '', status: null });
@@ -127,7 +222,9 @@ export default function OrderDetailPage({ orderId }) {
       const value = data.payment;
       if (!value || value.order_id !== id || value.payment_method !== originalOrder.payment_method ||
         value.amount !== originalOrder.total_amount || typeof value.order_status !== 'string' ||
-        typeof value.payment_status !== 'string' || typeof value.can_simulate !== 'boolean') {
+        typeof value.payment_status !== 'string' || typeof value.can_simulate !== 'boolean' ||
+        (value.workflow_version != null && originalOrder.workflow_version != null && value.workflow_version !== originalOrder.workflow_version) ||
+        (value.refunds != null && !Array.isArray(value.refunds))) {
         throw new Error('Thông tin thanh toán cần được kiểm tra lại. Vui lòng thử lại.');
       }
       setPaymentResult({ ownerId, order: originalOrder, loading: false, value, error: '' });
@@ -153,7 +250,10 @@ export default function OrderDetailPage({ orderId }) {
         <section className="order-detail-card order-detail-shipping" aria-labelledby="order-shipping-title"><div className="order-detail-section-heading"><MapPin size={20} aria-hidden="true" /><h2 id="order-shipping-title">Thông tin nhận hàng</h2></div><dl className="order-detail-data"><div><dt>Người nhận</dt><dd>{order.recipient_name || 'Chưa có thông tin'}</dd></div><div><dt>Số điện thoại</dt><dd>{order.phone || 'Chưa có thông tin'}</dd></div><div><dt>Địa chỉ</dt><dd className="order-detail-multiline">{order.shipping_address || 'Chưa có thông tin'}</dd></div><div><dt>Ghi chú</dt><dd className="order-detail-multiline">{order.note || 'Không có ghi chú'}</dd></div></dl></section>
         <OrderHistory history={order.history} />
       </div><aside className="order-detail-summary">
-        <section className="order-detail-card order-detail-totals" aria-labelledby="order-total-title"><div className="order-detail-section-heading"><CreditCard size={20} aria-hidden="true" /><h2 id="order-total-title">Tổng tiền đơn hàng</h2></div><dl><div><dt>Tiền hàng</dt><dd>{formatPrice(order.total_amount)}</dd></div><div><dt>Phí vận chuyển</dt><dd>Chưa tính</dd></div><div className="order-detail-total"><dt>Tổng tiền hàng</dt><dd>{formatPrice(order.total_amount)}</dd></div></dl><p className="order-detail-muted">Tổng tiền chưa gồm phí vận chuyển. Phí vận chuyển hiện chưa được quy định.</p></section>
+        <section className="order-detail-card order-detail-totals" aria-labelledby="order-total-title"><div className="order-detail-section-heading"><CreditCard size={20} aria-hidden="true" /><h2 id="order-total-title">Tổng tiền đơn hàng</h2></div><dl>{hasVoucher ? <>
+          <div className="order-detail-subtotal"><dt>Tạm tính</dt><dd>{formatOrderMoney(order.subtotal_amount ?? order.total_amount, true)}</dd></div>
+          <div className="order-detail-voucher-discount"><dt>Giảm giá Voucher{order.voucher_code_snapshot ? <span className="order-detail-voucher-code">{order.voucher_code_snapshot}</span> : null}</dt><dd>{order.discount_amount == null ? 'Chưa có thông tin' : `−${formatOrderMoney(order.discount_amount, true)}`}</dd></div>
+        </> : <div><dt>Tiền hàng</dt><dd>{formatOrderMoney(order.total_amount)}</dd></div>}<div><dt>Phí vận chuyển</dt><dd>Chưa tính</dd></div><div className="order-detail-total"><dt>Tổng tiền hàng</dt><dd>{formatOrderMoney(order.total_amount, hasVoucher)}</dd></div></dl><p className="order-detail-muted">Tổng tiền chưa gồm phí vận chuyển. Phí vận chuyển hiện chưa được quy định.</p></section>
         <PaymentDetails order={order} state={paymentState} onRetry={() => setPaymentRetry(value => value + 1)} />
       </aside></div>
     </> : null}

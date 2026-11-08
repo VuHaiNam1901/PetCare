@@ -399,3 +399,162 @@ for (const width of [1440, 768, 390, 320]) {
     expectNoOrderMutations(account);
   });
 }
+
+test('Online v2 chờ thanh toán trước bước duyệt, hiện hạn thanh toán và không dựng nút thanh toán', async ({ page }) => {
+  const order = populatedOrder({
+    workflow_version: 2,
+    payment_method: 'ONLINE',
+    status: 'Chờ thanh toán',
+    payment_status: 'Chưa thanh toán',
+    approval_state: 'awaiting_payment',
+    payment_expires_at: '2026-11-01T08:15:00.000Z',
+  });
+  const account = await mockMyOrders(page, { orders: [order] });
+  await page.goto('/my-orders/801');
+  await expect(page.locator('.order-detail-status')).toHaveText('Chờ thanh toán');
+  const stepLabels = await page.locator('.order-detail-steps strong').allTextContents();
+  expect(stepLabels).toEqual(['Đã đặt hàng', 'Chờ thanh toán', 'Chờ duyệt', 'Chờ giao hàng', 'Đang giao hàng', 'Đã giao hàng']);
+  await expect(page.locator('.order-detail-steps [aria-current="step"]')).toContainText('Chờ thanh toán');
+  await expect(page.locator('.order-detail-payment')).toContainText('Hạn thanh toán');
+  await expect(page.locator('.order-detail-payment time[datetime="2026-11-01T08:15:00.000Z"]')).toBeVisible();
+  await expect(page.locator('.order-detail-payment')).toContainText('thanh toán trước khi Admin duyệt');
+  await expect(page.locator('.order-detail-payment')).not.toContainText('Đơn hàng cần được Admin duyệt trước khi thanh toán.');
+  await expect(page.locator('.order-detail-payment')).toContainText('Giao diện thanh toán chưa được tích hợp');
+  await noPaymentAction(page);
+  expectNoOrderMutations(account);
+});
+
+test('Online v2 không cho mô phỏng khi cửa sổ hoặc cấu hình tắt, và đồng bộ sang Chờ duyệt sau khi đã thanh toán', async ({ page }) => {
+  const order = populatedOrder({
+    workflow_version: 2,
+    payment_method: 'ONLINE',
+    status: 'Chờ thanh toán',
+    payment_status: 'Thất bại',
+    approval_state: 'awaiting_payment',
+    payment_expires_at: '2026-11-01T08:15:00.000Z',
+  });
+  const account = await mockMyOrders(page, {
+    orders: [order],
+    paymentOverrides: {
+      801: { can_simulate: false },
+    },
+  });
+  await page.goto('/my-orders/801');
+  await expect(page.locator('.order-detail-payment-status')).toHaveText('Thất bại');
+  await expect(page.locator('.order-detail-payment')).toContainText('Lần thanh toán gần nhất chưa thành công.');
+  await expect(page.locator('.order-detail-payment')).not.toContainText(/có thể thanh toán mô phỏng/i);
+  await noPaymentAction(page);
+
+  Object.assign(order, {
+    status: 'Chờ xử lý',
+    payment_status: 'Đã thanh toán',
+    approval_state: 'pending',
+    transaction_date: '2026-10-31T09:05:00.000Z',
+  });
+  await page.locator('.order-detail-refresh').click();
+  await expect(page.locator('.order-detail-status')).toHaveText('Chờ duyệt');
+  await expect(page.locator('.order-detail-steps li').nth(1)).toHaveClass(/is-complete/);
+  await expect(page.locator('.order-detail-steps [aria-current="step"]')).toContainText('Chờ duyệt');
+  await expect(page.locator('.order-detail-payment-status')).toHaveText('Đã thanh toán');
+  await expect(page.locator('.order-detail-payment')).toContainText('đang chờ cửa hàng duyệt');
+  await noPaymentAction(page);
+  expectNoOrderMutations(account);
+});
+
+test('Online v2 quá hạn thanh toán 24 giờ hiển thị rõ nguyên nhân và không vi phạm quy tắc giờ hủy', async ({ page }) => {
+  const order = populatedOrder({
+    workflow_version: 2,
+    payment_method: 'ONLINE',
+    status: 'Đã hủy',
+    payment_status: 'Đã hủy',
+    approval_state: 'cancelled',
+    cancellation_reason_code: 'payment_expired',
+    payment_expires_at: '2026-11-01T08:15:00.000Z',
+    history: [
+      { history_id: 201, from_status: 'Chờ thanh toán', to_status: 'Đã hủy', action: 'payment_expired', created_at: '2026-11-01T08:16:00.000Z', reason: 'Đơn Online hết hạn thanh toán 24 giờ.' },
+    ],
+  });
+  const account = await mockMyOrders(page, { orders: [order] });
+  await page.goto('/my-orders/801');
+  await expect(page.locator('.order-detail-status')).toHaveText('Đã hủy');
+  await expect(page.locator('.order-detail-cancelled')).toContainText('Đơn hàng đã hủy do quá hạn thanh toán');
+  await expect(page.locator('.order-detail-payment')).toContainText('quá thời hạn thanh toán 24 giờ');
+  await expect(page.locator('.order-history')).toContainText('Hủy do quá hạn thanh toán');
+  await expect(detailPage(page)).not.toContainText(/(?:Hủy lúc|Ngày hủy|Thời điểm hủy)\s*:?\s*\d/i);
+  await noPaymentAction(page);
+  expectNoOrderMutations(account);
+});
+
+test('Online v2 bị từ chối sau khi thanh toán phân biệt rõ yêu cầu hoàn tiền chờ xử lý và đã hoàn tiền', async ({ page }) => {
+  const refund = {
+    refund_id: 71,
+    amount: '788214.75',
+    currency: 'VND',
+    reason_code: 'admin_rejected',
+    status: 'requested',
+    requested_at_utc: '2026-10-31T10:30:00.000Z',
+    updated_at_utc: '2026-10-31T10:30:00.000Z',
+    confirmed_at_utc: null,
+  };
+  const order = populatedOrder({
+    workflow_version: 2,
+    payment_method: 'ONLINE',
+    status: 'Đã hủy',
+    payment_status: 'Đã thanh toán',
+    approval_state: 'rejected',
+    cancellation_reason_code: 'admin_rejected',
+    rejection_reason: 'Sản phẩm vừa phát sinh lỗi bao bì tại kho.',
+    transaction_date: '2026-10-31T08:45:00.000Z',
+    subtotal_amount: '829700.00',
+    discount_amount: '41485.25',
+    voucher_code_snapshot: 'PETCARE_VIP_5PCT',
+    total_amount: '788214.75',
+    refunds: [refund],
+  });
+  const account = await mockMyOrders(page, { orders: [order] });
+  await page.goto('/my-orders/801');
+  await expect(page.locator('.order-detail-status')).toHaveText('Đã từ chối');
+  await expect(page.locator('.order-detail-payment-status')).toHaveText('Đã thanh toán');
+  const refundCard = page.locator('.order-detail-refund[data-refund-id="71"]');
+  await expect(refundCard).toContainText('Chờ xử lý hoàn tiền');
+  await expect(refundCard).toContainText('788.214,75');
+  await expect(refundCard).toContainText('Đơn hàng bị từ chối sau khi đã thanh toán.');
+  await expect(page.locator('.order-detail-refund-block')).toContainText('chỉ hoàn tất khi cổng thanh toán xác nhận trạng thái Đã hoàn tiền');
+
+  Object.assign(refund, { status: 'succeeded', confirmed_at_utc: '2026-10-31T11:20:00.000Z' });
+  await page.reload();
+  await expect(refundCard).toContainText('Đã hoàn tiền');
+  await expect(refundCard).not.toContainText('Chờ xử lý hoàn tiền');
+  await expect(refundCard.locator('time[datetime="2026-10-31T11:20:00.000Z"]')).toBeVisible();
+  await noPaymentAction(page);
+  expectNoOrderMutations(account);
+});
+
+test('đơn áp dụng Voucher hiển thị Tạm tính, mã giảm giá, phần lẻ thập phân và vừa khung 320px', async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 960 });
+  const longCode = 'PETCARE_VOUCHER_KIEM_THU_320PX_KHONG_TRAN_KHUNG_2026_ABCDEFGHIJ';
+  const order = populatedOrder({
+    subtotal_amount: '829700.00',
+    discount_amount: '41485.25',
+    voucher_code_snapshot: longCode,
+    total_amount: '788214.75',
+  });
+  const account = await mockMyOrders(page, { orders: [order] });
+  await page.goto('/my-orders/801');
+  const totals = page.locator('.order-detail-totals');
+  await expect(totals).toContainText('Tạm tính');
+  await expect(totals).toContainText(formatPrice('829700.00'));
+  await expect(totals.locator('.order-detail-voucher-discount')).toContainText('Giảm giá Voucher');
+  await expect(totals.locator('.order-detail-voucher-code')).toHaveText(longCode);
+  await expect(totals.locator('.order-detail-voucher-discount')).toContainText('−41.485,25');
+  await expect(page.locator('.order-detail-total')).toContainText('788.214,75');
+  expect(await detailPage(page).evaluate(element => [...element.querySelectorAll('.order-detail-totals, .order-detail-voucher-code, .order-detail-total')].every(node => {
+    const box = node.getBoundingClientRect();
+    return box.left >= 0 && box.right <= innerWidth;
+  }) && document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+
+  await page.locator('.order-detail-page').getByRole('link', { name: /Đơn hàng của tôi/i }).first().click();
+  await expect(page).toHaveURL(/\/my-orders$/);
+  await expect(page.locator('.my-order-card[data-order-id="801"]')).toContainText('788.214,75');
+  expectNoOrderMutations(account);
+});

@@ -3,8 +3,7 @@ import { ArrowRight, CalendarDays, ChevronLeft, ChevronRight, ClipboardList, Pac
 import { useCommerce } from '../context/CommerceContext.jsx';
 import { EmptyState, ErrorNotice } from '../components/Feedback.jsx';
 import { OrderItems, OrderStatusBadge, OrdersLoading } from '../components/OrderContent.jsx';
-import { formatPrice } from '../utils/catalog.js';
-import { formatOrderDate } from '../utils/orders.js';
+import { formatOrderDate, formatOrderMoney } from '../utils/orders.js';
 import { safeReturnUrl } from '../utils/auth-navigation.js';
 import { BRAND_NAME } from '../config/branding.js';
 import '../my-orders.css';
@@ -12,6 +11,7 @@ import '../my-orders.css';
 const PAGE_SIZE = 10;
 function OrderCard({ order }) {
   const detailsHref = `/my-orders/${order.order_id}`;
+  const hasVoucher = Boolean(order.voucher_code_snapshot) || (order.discount_amount != null && Number(order.discount_amount) > 0);
   return <article className="my-order-card" data-order-id={order.order_id} aria-labelledby={`my-order-${order.order_id}`}>
     <header className="my-order-header">
       <div className="my-order-heading"><span className="my-order-icon"><Package size={20} aria-hidden="true" /></span><div><h2 id={`my-order-${order.order_id}`}>Đơn hàng <span>#{order.order_id}</span></h2><p><CalendarDays size={13} aria-hidden="true" /><time dateTime={order.order_date || undefined}>Đặt ngày {formatOrderDate(order.order_date) || 'Chưa có ngày đặt'}</time></p></div></div>
@@ -19,7 +19,7 @@ function OrderCard({ order }) {
     </header>
     <OrderItems items={order.items} orderId={order.order_id} />
     {order.rejection_reason && <p className="my-order-rejection"><strong>Lý do từ chối: </strong>{order.rejection_reason}</p>}
-    <footer className="my-order-footer"><div className="my-order-total"><p>Tổng tiền <strong>{formatPrice(order.total_amount)}</strong></p><small>Tiền hàng chưa gồm phí vận chuyển</small></div><a className="button button-outline my-order-details" href={detailsHref}>Xem chi tiết<ArrowRight size={15} aria-hidden="true" /></a></footer>
+    <footer className="my-order-footer"><div className="my-order-total"><p>Tổng tiền <strong>{formatOrderMoney(order.total_amount, hasVoucher)}</strong></p><small>Tiền hàng chưa gồm phí vận chuyển</small></div><a className="button button-outline my-order-details" href={detailsHref}>Xem chi tiết<ArrowRight size={15} aria-hidden="true" /></a></footer>
   </article>;
 }
 

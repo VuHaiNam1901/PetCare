@@ -10,7 +10,8 @@
 .order-detail-overview > div > p { display: flex; align-items: center; gap: 6px; margin-top: 7px; font-size: 11px; color: var(--color-muted); }
 .order-detail-overview-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 15px; }
 .order-detail-status.my-order-status { margin-left: 0; padding: 7px 10px; font-size: 11px; background: #fff; border: 1px solid currentColor; }
-.order-detail-refresh { display: inline-flex; align-items: center; gap: 6px; border: 0; background: transparent; color: var(--color-primary-hover); padding: 6px 0; font-size: 10px; }
+.order-detail-refresh { display: inline-flex; align-items: center; gap: 6px; min-height: 28px; min-width: 24px; border: 0; background: transparent; color: var(--color-primary-hover); padding: 6px 2px; font-size: 10px; cursor: pointer; }
+.order-detail-refresh:focus-visible { outline: 2px solid var(--color-primary-hover); outline-offset: 3px; border-radius: 4px; }
 .order-detail-card { min-width: 0; padding: 23px; border: 1px solid var(--color-border); border-radius: 8px; background: #fff; }
 .order-detail-section-heading { display: flex; align-items: center; gap: 9px; margin-bottom: 20px; }
 .order-detail-section-heading > svg { color: var(--color-primary-hover); flex-shrink: 0; }
@@ -65,10 +66,23 @@
 .order-detail-payment-error .error-notice { flex-wrap: wrap; padding: 13px; gap: 10px; }
 .order-detail-payment-error .error-notice h3 { font-size: 12px; }
 .order-detail-payment-error .error-notice p { font-size: 10px; }
+.order-detail-refund-block { margin-top: 18px; padding-top: 16px; border-top: 1px solid #EDF3FA; }
+.order-detail-subheading { margin: 0 0 11px; font-size: 13px; line-height: 1.5; color: var(--color-text); }
+.order-detail-refunds { display: grid; gap: 10px; list-style: none; margin: 0; padding: 0; }
+.order-detail-refund { min-width: 0; padding: 11px 12px; border: 1px solid var(--color-border); border-radius: 6px; background: var(--color-page); font-size: 11px; line-height: 1.8; overflow-wrap: anywhere; }
+.order-detail-refund.is-pending { border-color: #F2D9A0; background: #FFF9EB; color: #7A4F08; }
+.order-detail-refund.is-succeeded { border-color: #BFE5CC; background: #F1FBF4; color: #1E6B3B; }
+.order-detail-refund.is-attention { border-color: #F1D2CF; background: #FFF5F3; color: #9A4641; }
+.order-detail-refund-heading { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 4px 12px; }
+.order-detail-refund-heading strong, .order-detail-refund-heading span { font-size: 11px; font-weight: 700; }
+.order-detail-refund > p { margin: 4px 0 0; font-size: 11px; color: var(--color-text); }
+.order-detail-refund-times { display: grid; gap: 2px; margin-top: 5px; font-size: 10px; color: var(--color-muted); }
 .order-detail-totals dl { margin: 0; }
 .order-detail-totals dl > div { display: flex; align-items: baseline; justify-content: space-between; gap: 15px; margin-top: 14px; font-size: 12px; }
-.order-detail-totals dt { color: var(--color-muted); }
-.order-detail-totals dd { margin: 0; font-weight: 600; text-align: right; }
+.order-detail-totals dt { min-width: 0; color: var(--color-muted); }
+.order-detail-totals dd { min-width: 0; margin: 0; font-weight: 600; text-align: right; overflow-wrap: anywhere; }
+.order-detail-totals .order-detail-voucher-discount dt, .order-detail-totals .order-detail-voucher-discount dd { color: #12659D; }
+.order-detail-voucher-code { display: block; margin-top: 3px; font-size: 10px; font-weight: 700; letter-spacing: .2px; overflow-wrap: anywhere; }
 .order-detail-totals .order-detail-total { margin-top: 18px; padding-top: 18px; border-top: 1px solid var(--color-border); }
 .order-detail-total dt { max-width: 125px; color: var(--color-text); font-weight: 600; }
 .order-detail-total dd { color: var(--color-primary-hover); font-size: 23px; letter-spacing: -.5px; overflow-wrap: anywhere; }
