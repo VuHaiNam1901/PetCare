@@ -68,6 +68,10 @@ test('UC13 quality: evaluation logic runs without external models or database wr
         if (answer.mode === 'care') assert.deepEqual(answer.products, []);
         for (const [key, expected] of Object.entries(item.expected_logic.filters || {})) assert.equal(searches[0]?.[key], expected);
         assert.equal(JSON.stringify(answer).includes('UC13_PRIVATE_CATALOG_ERROR'), false);
+        if (item.id === 'injection-01') {
+            assert.doesNotMatch(answer.message, /123|999/);
+            assert.equal(modelCalls.length, 0, 'factual source cards need no generation and must not repeat invented request facts');
+        }
     });
 });
 

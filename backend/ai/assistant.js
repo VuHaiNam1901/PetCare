@@ -22,14 +22,62 @@ function prepareInput(input) {
     });
     return { ...input, message: redactPersonal(input.message), history };
 }
-function render(context, plan, code = 'OK') {
+function render(context, plan, code = 'OK', generated = false) {
     setCode(code);
     return { mode: context.mode, intent: context.intent || (context.mode === 'care' ? 'care' : 'product_search'), message: plan.advice,
         products: plan.product_ids.map(id => {
             const p = context.products.find(row => row.product_id === id);
             return { product_id: p.product_id, category_id: p.category_id, category_name: p.category_name, name: p.name, price: p.price, stock_quantity: p.stock_quantity, image_url: p.image_url, status: p.status, available: p.status === 'Đang bán' && p.stock_quantity > 0, source: 'MySQL' };
-        }), follow_up: plan.follow_up, warnings: plan.warnings, code, model: MODEL,
-        care_advice: context.mode === 'care' ? [{ source: 'general_knowledge', text: plan.advice }] : [], context_search: context.search || {} };
+        }), follow_up: plan.follow_up, warnings: plan.warnings, code, ...(generated ? { model: MODEL } : {}),
+        care_advice: context.mode === 'care' ? [{ source: 'general_knowledge', text: plan.advice }] : [],
+        ...(context.search && !context.needsClarification ? { context_search: context.search } : {}) };
+}
+
+function directReply(context) {
+    if (context.needsClarification === 'compare') return render(context, {
+        advice: 'Bạn muốn so sánh những sản phẩm nào? Mình cần tên hoặc các sản phẩm bạn vừa chọn để đối chiếu đúng thông tin.',
+        product_ids: [], follow_up: 'Bạn cho mình biết tên hai sản phẩm muốn so sánh nhé?', warnings: []
+    });
+    if (context.needsClarification === 'product') return render(context, {
+        advice: 'Mình chưa xác định được sản phẩm bạn đang nhắc đến.', product_ids: [],
+        follow_up: 'Bạn cho mình biết tên sản phẩm hoặc chọn một sản phẩm trong cuộc trò chuyện nhé?', warnings: []
+    });
+    if (context.intent === 'clarification') return render(context, {
+        advice: 'Mình đang lắng nghe. Bạn muốn tìm sản phẩm hay tìm hiểu cách chăm sóc chó mèo?',
+        product_ids: [], follow_up: 'Bạn mô tả thêm nhu cầu của mình nhé?', warnings: []
+    });
+    if (context.intent === 'out_of_scope') return render(context, {
+        advice: 'Mình hỗ trợ tìm sản phẩm và tư vấn chăm sóc chó mèo tại PetCareShop. Mình chưa thể hỗ trợ yêu cầu ngoài phạm vi này.',
+        product_ids: [], follow_up: 'Bạn có muốn tìm sản phẩm hoặc hỏi về cách chăm sóc thú cưng không?', warnings: []
+    });
+    if (['catalog_overview', 'category_list'].includes(context.intent)) {
+        if (context.catalogStatus === 'unavailable') return fallback(context, 'CATALOG_UNAVAILABLE');
+        // These are source labels, not generated advice. Reject unsafe labels
+        // rather than turning stored instructions or private data into prose.
+        const names = [...new Set((context.categories || []).map(row => row.name).filter(name =>
+            typeof name === 'string' && name.trim() && name.length <= 100 && redactPersonal(name) === name &&
+            !/[<>\u0000-\u001F\u007F]|\p{Cf}|https?:\/\/|www\.|```|system.?prompt|GEMINI_API_KEY|JWT_SECRET|DATABASE_PASSWORD|ignore.*instructions|bỏ qua.*(?:quy tắc|chỉ dẫn)/iu.test(name)
+        ).map(name => name.normalize('NFC').trim()))];
+        const shown = [];
+        for (const name of names) {
+            if (shown.join('; ').length + name.length > 1400) break;
+            shown.push(name);
+        }
+        const limited = context.catalogLimited || context.contextLimited || shown.length < names.length || context.totalMatches > shown.length;
+        const advice = shown.length
+            ? `${limited ? 'Một số danh mục' : 'Các danh mục'} hiện có trong dữ liệu cửa hàng gồm: ${shown.map(name => `“${name}”`).join('; ')}. Bạn có thể chọn nhóm mình quan tâm để xem sản phẩm cụ thể.`
+            : 'Mình chưa có dữ liệu danh mục được xác nhận để giới thiệu lúc này. Bạn có thể cho biết loại sản phẩm đang quan tâm để mình tìm cụ thể.';
+        return render(context, { advice, product_ids: [], follow_up: 'Bạn đang quan tâm đến sản phẩm cho chó hay mèo?', warnings: [] });
+    }
+    if (context.intent === 'price_stock' && context.catalogStatus === 'ok' && !context.requiresGeneration) {
+        // Exact commercial facts stay in source-backed cards. The same ID,
+        // stock, budget and prose guard applies even without a model call.
+        const plan = { advice: 'Bạn xem giá và tồn kho tại thời điểm tra cứu trong các thẻ sản phẩm bên dưới nhé.',
+            product_ids: context.products.slice(0, 3).map(product => product.product_id), follow_up: null, warnings: [] };
+        try { return measureSync('grounding_ms', () => render(context, validatePlan({ text: JSON.stringify(plan), candidates: [{ finishReason: 'STOP' }] }, context))); }
+        catch { return fallback(context, 'GROUNDING_REJECTED'); }
+    }
+    return null;
 }
 function fallback(context, code) {
     let advice;
@@ -60,11 +108,13 @@ function createAssistant({ repository = createProductRepository(), generate = ge
         const prepared = measureSync('context_history_ms', () => prepareInput(input));
         const context = await buildContext({ ...prepared, repository });
         if (context.urgent) return fallback(context, 'VETERINARY_REFERRAL');
+        const direct = directReply(context);
+        if (direct) return direct;
         if (context.mode === 'product' && context.catalogStatus !== 'ok') return fallback(context, context.catalogStatus === 'empty' ? 'NO_PRODUCTS' : 'CATALOG_UNAVAILABLE');
         const request = measureSync('context_history_ms', () => ({ model: MODEL, contents: JSON.stringify(context.payload), config: { maxOutputTokens: CHAT_OUTPUT_TOKENS, systemInstruction: SYSTEM_PROMPT, responseMimeType: 'application/json', responseJsonSchema: PLAN_SCHEMA } }));
         let response;
         try { response = await measure('gemini_ms', () => generate(request)); } catch (error) { return fallback(context, errorCode(error)); }
-        try { return measureSync('grounding_ms', () => render(context, validatePlan(response, context))); }
+        try { return measureSync('grounding_ms', () => render(context, validatePlan(response, context), 'OK', true)); }
         catch (error) {
             try { onRejected(rejectionCode(error)); } catch { /* Diagnostics cannot affect the response. */ }
             return fallback(context, 'GROUNDING_REJECTED');

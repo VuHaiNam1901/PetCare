@@ -3,6 +3,7 @@ const { authenticate, authorize } = require('../middleware/auth');
 const { createSessionCodec, createChatStore, requestHash, chatError } = require('../ai/sessions');
 const { createChatLimiter } = require('../ai/rate-limit');
 const { runMeasured, setCode } = require('../ai/metrics');
+const { readChatPipeline } = require('../config/chat-pipeline');
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const TRANSIENT = new Set(['CATALOG_UNAVAILABLE', 'GEMINI_BAD_REQUEST', 'GEMINI_AUTH', 'GEMINI_MODEL_UNAVAILABLE', 'GEMINI_QUOTA', 'GEMINI_TIMEOUT', 'GEMINI_UNAVAILABLE']);
@@ -29,7 +30,15 @@ function publicResponse(response) {
     return Object.fromEntries(PUBLIC_FIELDS.filter(key => Object.hasOwn(response, key)).map(key => [key, response[key]]));
 }
 
-function createChatRouter({ assistant, store, limiter = createChatLimiter(), sessionCodec, capacity = sharedCapacity, onMetrics } = {}) {
+function createChatRouter({ assistant, store, limiter = createChatLimiter(), sessionCodec, capacity = sharedCapacity, onMetrics,
+    pipeline, assistantFactories } = {}) {
+    // Snapshot configuration per router/process; clients cannot select a
+    // pipeline, and an error never silently retries through another pipeline.
+    const selectedPipeline = readChatPipeline(pipeline === undefined ? process.env : { CHAT_PIPELINE: pipeline });
+    if (assistantFactories !== undefined && (!assistantFactories || typeof assistantFactories !== 'object' ||
+        Object.keys(assistantFactories).some(key => !['legacy', 'orchestrator'].includes(key) || typeof assistantFactories[key] !== 'function'))) {
+        throw new TypeError('Invalid chat assistant factories');
+    }
     const router = express.Router();
     const allowedUser = authorize('user');
     // Defaults are initialized only when the route is used. Tests can inject the
@@ -103,7 +112,6 @@ function createChatRouter({ assistant, store, limiter = createChatLimiter(), ses
                 throw chatError(503, 'CHAT_BUSY', 'Trợ lý đang bận. Bạn vui lòng thử lại sau ít giây.');
             }
             chatStore ||= createChatStore();
-            chatAssistant ||= require('../ai/assistant').createAssistant();
             const hash = requestHash(body.message);
             const result = await chatStore.withSession({ sessionId, userId }, async session => {
                 const previous = await session.findRequest(requestId);
@@ -111,20 +119,38 @@ function createChatRouter({ assistant, store, limiter = createChatLimiter(), ses
                     if (previous.request_hash !== hash) throw chatError(409, 'REQUEST_CONFLICT', 'Mã yêu cầu này đã được dùng cho một tin nhắn khác.');
                     return { response: previous.response, replayed: true };
                 }
-                const history = await session.history();
+                let assistantInput;
+                if (selectedPipeline === 'orchestrator') {
+                    if (typeof session.loadMemory !== 'function') throw chatError(503, 'MEMORY_UNAVAILABLE', 'Chưa thể khôi phục ngữ cảnh cuộc trò chuyện. Bạn vui lòng thử lại.');
+                    const memory = await session.loadMemory();
+                    assistantInput = { message: body.message, turn_id: `u:${requestId}`,
+                        ...(memory === null ? { history: await session.history() } : { memory }) };
+                } else assistantInput = { message: body.message, history: await session.history() };
+                // Replayed or invalid requests do not initialize either model.
+                if (!chatAssistant) {
+                    const factory = assistantFactories?.[selectedPipeline];
+                    chatAssistant = factory ? factory() : selectedPipeline === 'orchestrator'
+                        ? require('../ai/orchestrator').createOrchestrator()
+                        : require('../ai/assistant').createAssistant();
+                }
+                if (!chatAssistant || typeof chatAssistant.reply !== 'function') throw chatError(503, 'ASSISTANT_UNAVAILABLE', 'Trợ lý đang tạm thời gián đoạn. Bạn vui lòng thử lại.');
                 let response;
-                try { response = await chatAssistant.reply({ message: body.message, history }); }
+                try { response = await chatAssistant.reply(assistantInput); }
                 catch (error) {
                     if (error.code === 'INVALID_SEARCH') throw chatError(400, 'INVALID_SEARCH', 'Yêu cầu trò chuyện không hợp lệ. Vui lòng kiểm tra nội dung tin nhắn.');
                     throw error;
                 }
                 if (!response || typeof response.message !== 'string' || !response.message.trim()) throw chatError(503, 'ASSISTANT_UNAVAILABLE', 'Trợ lý đang tạm thời gián đoạn. Bạn vui lòng thử lại.');
                 if (TRANSIENT.has(response.code)) throw chatError(response.code === 'GEMINI_TIMEOUT' ? 504 : 503, response.code, 'Trợ lý đang tạm thời gián đoạn. Bạn vui lòng thử lại.');
+                if (selectedPipeline === 'orchestrator' && (response.code !== 'OK' || !response.memory)) {
+                    throw chatError(503, 'MEMORY_INVALID', 'Chưa thể xác minh ngữ cảnh cuộc trò chuyện. Bạn vui lòng thử lại.');
+                }
                 // Persist only the documented response fields and the grounded
                 // search state used by future turns; never persist model prompts.
                 const saved = publicResponse(response);
                 if (response.context_search) saved.context_search = response.context_search;
-                await session.savePair({ message: body.message, requestId, hash, response: saved });
+                await session.savePair({ message: body.message, requestId, hash, response: saved,
+                    pipeline: selectedPipeline, ...(selectedPipeline === 'orchestrator' ? { memory: response.memory } : {}) });
                 return { response: saved, replayed: false };
             });
             setCode(result.response.code || 'OK');

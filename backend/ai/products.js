@@ -8,7 +8,7 @@ function defaultDatabase() {
 }
 const invalid = message => { throw Object.assign(new Error(message), { code: 'INVALID_SEARCH' }); };
 const normalizeText = value => String(value ?? '').normalize('NFD').replace(/\p{M}/gu, '').replace(/[đĐ]/g, 'd').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim().replace(/\s+/g, ' ');
-const STOP_WORDS = new Set('toi minh ban hay giup tim kiem mua san pham cua hang petcare tu van goi y muon can loai nao gi mot vai cac nhung voi va la co biet ve duoc phu hop nhat khong nhe xem danh sach gia bao nhieu tien ngan sach khoang tam duoi tren toi da it qua re dat hon tot ngon bo de su dung ma nay do ay the danh thang tuoi kg g trieu nghin ngan k vnd dong'.split(' '));
+const STOP_WORDS = new Set('toi minh ban hay giup tim kiem mua san pham cua hang petcare shop oi nhi nha tu van goi y muon can loai nao gi mot vai cac nhung voi va la co biet ve duoc phu hop nhat khong nhe xem danh sach gia bao nhieu tien ngan sach khoang tam duoi tren toi da it qua re dat hon tot ngon bo de su dung ma nay do ay the danh thang tuoi kg g trieu nghin ngan k vnd dong'.split(' '));
 // Deliberately small alias groups avoid arbitrary fuzzy matches.
 const CONCEPTS = [
     ['dau ca', 'fish oil', 'omega 3', 'omega3'],
@@ -22,6 +22,7 @@ const CONCEPTS = [
 ];
 const FOOD_TYPES = new Set(['thuc an', 'hat', 'pate', 'snack']);
 const PRODUCT_TYPES = new Set([...FOOD_TYPES, 'dau ca', 'do choi']);
+const TYPED_PRODUCT_TYPES = Object.freeze({ food: 'thuc an', kibble: 'hat', wet_food: 'pate', snack: 'snack', toys: 'do choi', fish_oil: 'dau ca' });
 const NON_FOOD_CATEGORY = /\b(phu kien|ve sinh|do choi|long chuong|van chuyen|quan ao)\b/;
 const NON_FOOD_NAME = /\b(do choi|sua tam|dau goi|vong co|day dat|long van chuyen|cat ve sinh|nha ve sinh|khay ve sinh|luoc chai)\b/;
 const FOOD_CONTAINER = /\b(?:(?:hop|thung|tui|binh|khay|lo|bao|bat|chen|dia)\s+(?:dung|chua|bao quan)|(?:bat|chen|khay|dia)\s+(?:an|thuc an)|may\s+(?:tu dong\s+)?cho an)\b/;
@@ -40,7 +41,7 @@ function decimal(value) {
 const toCents = value => BigInt(decimal(value).replace('.', ''));
 
 function validateFilters(input = {}) {
-    const allowed = ['query', 'keywords', 'categoryId', 'category', 'minPrice', 'maxPrice', 'limit', 'sort', 'productIds'];
+    const allowed = ['query', 'keywords', 'categoryId', 'category', 'minPrice', 'maxPrice', 'limit', 'sort', 'productIds', 'species', 'productType'];
     if (!input || typeof input !== 'object' || Array.isArray(input) || Object.keys(input).some(key => !allowed.includes(key))) invalid('Unsupported search filters');
     const filters = { limit: input.limit ?? 6, keywords: [] };
     if (!Number.isInteger(filters.limit) || filters.limit < 1 || filters.limit > 6) invalid('Search limit must be 1..6');
@@ -49,6 +50,14 @@ function validateFilters(input = {}) {
     if (input.categoryId !== undefined) {
         if (!Number.isInteger(input.categoryId) || input.categoryId < 1 || input.categoryId > 2147483647) invalid('Invalid category ID');
         filters.categoryId = input.categoryId;
+    }
+    if (input.species !== undefined) {
+        if (!['cat', 'dog'].includes(input.species)) invalid('Invalid product species');
+        filters.species = input.species;
+    }
+    if (input.productType !== undefined) {
+        if (typeof input.productType !== 'string' || !Object.hasOwn(TYPED_PRODUCT_TYPES, input.productType)) invalid('Invalid product type');
+        filters.productType = input.productType;
     }
     if (input.keywords !== undefined) {
         if (!Array.isArray(input.keywords) || input.keywords.length > 8) invalid('At most eight search keywords are accepted');
@@ -147,8 +156,28 @@ function relevance(row, terms, query) {
     return score;
 }
 
-function createProductRepository({ db } = {}) {
+function createProductRepository({ db, categoryReader } = {}) {
     return {
+        async listCategories() {
+            // Reuse the existing read-only catalog model in production. Resolve
+            // it lazily so an injected repository never opens a real DB pool.
+            if (db && !categoryReader) throw new Error('An injected category reader is required with an injected database');
+            return measure('mysql_products_ms', () => (categoryReader || require('../models/catalog').listCategories)());
+        },
+        // Exact references must not pass through relevance ranking or hide an
+        // out-of-stock item. The bound placeholders contain IDs only.
+        async getByIds(productIds) {
+            if (!Array.isArray(productIds) || productIds.length < 1 || productIds.length > 6 ||
+                new Set(productIds).size !== productIds.length || productIds.some(id => !Number.isInteger(id) || id < 1 || id > 2147483647)) invalid('Invalid product IDs');
+            const connection = db || defaultDatabase();
+            const [rows] = await measure('mysql_products_ms', () => connection.execute(`SELECT p.product_id, p.category_id, c.name AS category_name,
+                p.name, p.price, p.stock_quantity, LEFT(p.description, ${DESCRIPTION_LIMIT}) AS description,
+                p.image_url, p.status, p.created_at FROM products p
+                JOIN categories c ON c.category_id = p.category_id
+                WHERE p.status = ? AND p.product_id IN (${productIds.map(() => '?').join(', ')}) LIMIT 6`, [ACTIVE_STATUS, ...productIds]));
+            const found = new Map(rows.filter(row => row.status === ACTIVE_STATUS && productIds.includes(row.product_id)).map(row => [row.product_id, row]));
+            return productIds.filter(id => found.has(id)).map(id => found.get(id));
+        },
         // The stock option belongs to internal context construction, not filters.
         async search(input = {}, { includeOutOfStock = false } = {}) {
             const filters = validateFilters(input);
@@ -161,6 +190,11 @@ function createProductRepository({ db } = {}) {
             if (filters.maxPrice !== undefined) { conditions.push('p.price <= ?'); params.push(filters.maxPrice); }
             if (filters.productIds) { conditions.push(`p.product_id IN (${filters.productIds.map(() => '?').join(', ')})`); params.push(...filters.productIds); }
             const signals = searchSignals(filters.query, filters.keywords);
+            // Explicit typed filters supplied by the conversational model and
+            // validated memory take precedence over incidental query words.
+            // The existing normalization/ranking remains retrieval-only.
+            if (filters.species) signals.species = { cat: filters.species === 'cat', dog: filters.species === 'dog' };
+            if (filters.productType) signals.types = [TYPED_PRODUCT_TYPES[filters.productType]];
             const terms = signals.terms;
             const query = normalizeText(filters.query);
             const category = filters.category && normalizeText(filters.category);

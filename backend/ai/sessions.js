@@ -63,6 +63,45 @@ function storageJson(value) {
     return JSON.stringify(value).replace(/[\u007f-\uffff]/g, character => `\\u${character.charCodeAt(0).toString(16).padStart(4, '0')}`);
 }
 
+function memoryError() {
+    return chatError(503, 'MEMORY_INVALID', 'Không thể khôi phục bộ nhớ hội thoại. Bạn vui lòng thử lại sau.');
+}
+
+function memoryCheckpoint(value) {
+    try {
+        const { validateMemory, deserializeMemory } = require('./memory');
+        // Stored checkpoints must be an actual versioned snapshot. The memory
+        // core also accepts empty/legacy history for bootstrapping, which must
+        // not silently turn a corrupted checkpoint into an empty conversation.
+        validateMemory(value);
+        return deserializeMemory(value);
+    } catch { throw memoryError(); }
+}
+
+function envelopeMemory(text) {
+    const envelope = parseEnvelope(text);
+    if (!envelope) {
+        // Plain-text legacy answers have no checkpoint. A broken internal
+        // envelope is different: fail closed rather than importing it as chat.
+        let value;
+        try { value = JSON.parse(text); }
+        catch {
+            if (/^\s*\{/.test(text) && /"(?:memory|pipeline)"\s*:/.test(text)) throw memoryError();
+            return null;
+        }
+        if (value && typeof value === 'object' &&
+            (Object.hasOwn(value, 'memory') || Object.hasOwn(value, 'pipeline'))) throw memoryError();
+        return null;
+    }
+    if (envelope.pipeline !== undefined && !['legacy', 'orchestrator'].includes(envelope.pipeline)) throw memoryError();
+    if (envelope.memory == null) {
+        if (envelope.pipeline === 'orchestrator') throw memoryError();
+        return null;
+    }
+    if (envelope.pipeline === 'legacy') throw memoryError();
+    return memoryCheckpoint(envelope.memory);
+}
+
 function createChatStore({ pool = require('../config/db'), lockTimeoutSeconds = 5 } = {}) {
     return {
         async withSession({ sessionId, userId = null }, callback) {
@@ -97,9 +136,21 @@ function createChatStore({ pool = require('../config/db'), lockTimeoutSeconds = 
                             "SELECT sender, message FROM chat_histories WHERE session_id = ? AND sender IN ('user', 'assistant', 'bot') ORDER BY chat_history_id DESC LIMIT 8", [storageId]));
                         return measureSync('context_history_ms', () => rows.reverse().map(historyMessage));
                     },
-                    async savePair({ message, requestId, hash, response }) {
+                    async loadMemory() {
+                        const [rows] = await measure('mysql_history_load_ms', () => connection.execute(
+                            "SELECT message FROM chat_histories WHERE session_id = ? AND sender = 'assistant' ORDER BY chat_history_id DESC LIMIT 1", [storageId]));
+                        // Read only the latest answer. A legacy turn/null marker
+                        // invalidates older checkpoints after a flag rollback.
+                        return rows.length ? envelopeMemory(rows[0].message) : null;
+                    },
+                    async savePair({ message, requestId, hash, response, memory = null, pipeline = memory == null ? 'legacy' : 'orchestrator' }) {
+                        if (!['legacy', 'orchestrator'].includes(pipeline) ||
+                            (pipeline === 'legacy' && memory != null) ||
+                            (pipeline === 'orchestrator' && memory == null)) throw memoryError();
+                        const checkpoint = memory == null ? null : memoryCheckpoint(memory);
                         const userMessage = storageJson({ v: 1, request_id: requestId, text: message });
-                        const envelope = storageJson({ v: 1, request_id: requestId, request_hash: hash, response });
+                        const envelope = storageJson({ v: 1, request_id: requestId, request_hash: hash, response,
+                            memory: checkpoint, pipeline });
                         if (Buffer.byteLength(envelope, 'utf8') > 60000 || Buffer.byteLength(userMessage, 'utf8') > 60000) throw chatError(503, 'RESPONSE_TOO_LARGE', 'Không thể lưu câu trả lời. Bạn vui lòng thử lại.');
                         let started = false;
                         try {

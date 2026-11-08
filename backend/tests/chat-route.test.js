@@ -2,11 +2,36 @@ const { test, after } = require('node:test');
 const assert = require('node:assert/strict');
 const { randomBytes, randomUUID } = require('node:crypto');
 const express = require('express');
-process.env.JWT_SECRET = randomBytes(48).toString('hex');
+const testSecret = randomBytes(48).toString('hex');
 const jwt = require('jsonwebtoken');
-const users = require('../models/user');
-const pool = require('../config/db');
-const { createChatRouter, createChatCapacity } = require('../routes/chat');
+const blockedPoolCalls = [];
+const forbidPool = method => async () => {
+    blockedPoolCalls.push(method);
+    throw new Error(`Offline chat fixture forbids pool.${method}`);
+};
+const pool = Object.freeze({ execute: forbidPool('execute'), query: forbidPool('query'),
+    getConnection: forbidPool('getConnection'), async end() {} });
+// Load the real router/auth/user modules against fail-closed test dependencies.
+// config/db and config/auth are never evaluated, so neither .env nor mysql2 is
+// loaded. Restore all cache entries immediately; the router keeps its isolated
+// dependency objects without affecting another test file's module imports.
+const fixtureModules = ['../config/db', '../config/auth', '../models/user', '../middleware/auth', '../routes/chat']
+    .map(request => require.resolve(request));
+const savedModules = new Map(fixtureModules.map(filename => [filename, require.cache[filename]]));
+const cacheFixture = (filename, exports) => { require.cache[filename] = { id: filename, filename, loaded: true, exports }; };
+let users, createChatRouter, createChatCapacity;
+try {
+    for (const filename of fixtureModules) delete require.cache[filename];
+    cacheFixture(fixtureModules[0], pool);
+    cacheFixture(fixtureModules[1], { secret: testSecret, expiresIn: '1h' });
+    users = require('../models/user');
+    ({ createChatRouter, createChatCapacity } = require('../routes/chat'));
+} finally {
+    for (const [filename, previous] of savedModules) {
+        if (previous) require.cache[filename] = previous;
+        else delete require.cache[filename];
+    }
+}
 const { createChatStore, createSessionCodec, sessionStorageId, requestHash } = require('../ai/sessions');
 const { createChatLimiter } = require('../ai/rate-limit');
 
@@ -90,7 +115,7 @@ class MysqlFixture {
 
 const originalById = users.byId;
 users.byId = async id => ({ user_id: Number(id), role: id === '3' ? 'admin' : 'user', status: id === '4' ? 'inactive' : 'active' });
-after(async () => { users.byId = originalById; await pool.end(); });
+after(async () => { users.byId = originalById; await pool.end(); assert.deepEqual(blockedPoolCalls, []); });
 
 async function harness(options = {}) {
     const fixture = options.fixture || new MysqlFixture();
@@ -106,12 +131,12 @@ async function harness(options = {}) {
     app.use('/api/chat', createChatRouter({ assistant,
         store: createChatStore({ pool: fixture, lockTimeoutSeconds: options.lockTimeoutSeconds ?? 0.2 }),
         limiter: options.limiter || createChatLimiter({ sessionLimit: 100, ipLimit: 1000 }),
-        sessionCodec: createSessionCodec(process.env.JWT_SECRET), ...(options.capacity ? { capacity: options.capacity } : {}) }));
+        sessionCodec: createSessionCodec(testSecret), ...(options.capacity ? { capacity: options.capacity } : {}) }));
     const server = app.listen(0, '127.0.0.1');
     await new Promise(resolve => server.once('listening', resolve));
     const url = `http://127.0.0.1:${server.address().port}/api/chat`;
     return { fixture, calls,
-        token: userId => jwt.sign({}, process.env.JWT_SECRET, { subject: String(userId), expiresIn: '1h' }),
+        token: userId => jwt.sign({}, testSecret, { subject: String(userId), expiresIn: '1h' }),
         async post(body, token, rawAuthorization) {
             const response = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json',
                 ...(token ? { Authorization: `Bearer ${token}` } : {}), ...(rawAuthorization !== undefined ? { Authorization: rawAuthorization } : {}) }, body: JSON.stringify(body) });
@@ -159,6 +184,49 @@ test('guest sessions persist an atomic pair, round-trip emoji, replay retries an
     } finally { await h.close(); }
 });
 
+test('source-backed category answers retain the public contract and replay without generation', async () => {
+    const { createAssistant } = require('../ai/assistant');
+    const { createProductRepository } = require('../ai/products');
+    let categoryReads = 0, generations = 0;
+    const repository = createProductRepository({
+        db: { async execute() { throw new Error('An overview must not search products'); } },
+        categoryReader: async () => {
+            categoryReads++;
+            return [{ category_id: 91, name: 'Phụ kiện kiểm thử' }, { category_id: 92, name: 'Đồ chơi kiểm thử' }];
+        }
+    });
+    const assistant = createAssistant({ repository, generate: async () => {
+        generations++;
+        throw new Error('A category answer must not call a model');
+    } });
+    const h = await harness({ assistant });
+    try {
+        const body = input('Shop mình bán những gì nhỉ?');
+        const first = await h.post(body);
+        assert.equal(first.status, 200);
+        assert.equal(first.body.success, true);
+        assert.equal(first.body.code, 'OK');
+        assert.equal(first.body.intent, 'catalog_overview');
+        assert.equal(first.body.request_id, body.request_id);
+        assert.equal(first.body.session_id.length, 87);
+        assert.deepEqual(first.body.products, []);
+        assert.deepEqual(first.body.warnings, []);
+        assert.equal(typeof first.body.follow_up, 'string');
+        assert.match(first.body.message, /Phụ kiện kiểm thử/);
+        assert.match(first.body.message, /Đồ chơi kiểm thử/);
+        assert.equal(Object.hasOwn(first.body, 'model'), false);
+        assert.equal(Object.hasOwn(first.body, 'context_search'), false);
+        assert.equal(h.fixture.rows.length, 2);
+        const replay = await h.post({ ...body, session_id: first.body.session_id });
+        assert.equal(replay.status, 200);
+        assert.equal(replay.body.replayed, true);
+        assert.equal(replay.body.message, first.body.message);
+        assert.equal(categoryReads, 1);
+        assert.equal(generations, 0);
+        assert.equal(h.fixture.rows.length, 2);
+    } finally { await h.close(); }
+});
+
 test('authenticated sessions bind to the current user and reject forged, stolen, invalid and inactive credentials', async () => {
     const h = await harness();
     try {
@@ -179,7 +247,7 @@ test('authenticated sessions bind to the current user and reject forged, stolen,
         const guest = await h.post(input('guest'));
         assert.equal((await h.post(input('x', guest.body.session_id), h.token(1))).status, 403);
         // Valid server-issued tokens are usable before their first stored row.
-        const emptySession = createSessionCodec(process.env.JWT_SECRET).issue(1);
+        const emptySession = createSessionCodec(testSecret).issue(1);
         assert.equal((await h.post(input('first', emptySession), h.token(1))).status, 200);
     } finally { await h.close(); }
 });
@@ -211,7 +279,7 @@ test('same-session concurrent retries call the model once; a busy lock returns 4
     let count = 0;
     const h = await harness({ assistant: { async reply() { count++; began(); await gate; return { message: 'Complete', products: [] }; } } });
     try {
-        const session = createSessionCodec(process.env.JWT_SECRET).issue();
+        const session = createSessionCodec(testSecret).issue();
         const body = input('One message', session);
         const first = h.post(body);
         await ready;
@@ -318,7 +386,7 @@ test('oversized responses never open a transaction and session ownership is chec
         assert.equal((await h.post(input())).status, 503);
         assert.equal(h.fixture.rows.length, 0);
         assert.equal(h.fixture.events.includes('begin'), false);
-        const token = createSessionCodec(process.env.JWT_SECRET).issue();
+        const token = createSessionCodec(testSecret).issue();
         h.fixture.rows.push({ session_id: sessionStorageId(token), user_id: 1, sender: 'user', message: 'wrong owner' });
         assert.equal((await h.post(input('try', token))).status, 403);
     } finally { await h.close(); }

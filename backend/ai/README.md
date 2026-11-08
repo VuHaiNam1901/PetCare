@@ -12,8 +12,9 @@ schema, sản phẩm/danh mục, đặt hàng hay thanh toán. Model vẫn là
   ngữ cảnh và nhận diện tình huống nguy hiểm có xét phủ định.
 - `prompt.js`: System Prompt tiếng Việt và JSON schema ngắn, không ghép các câu
   mẫu để trả lời các lượt thành công.
-- `assistant.js`: Gemini tạo lời tư vấn tự nhiên, ID sản phẩm, câu hỏi bổ sung và
-  cảnh báo; Backend xác thực, tách thẻ sản phẩm và xử lý lỗi/fallback.
+- `assistant.js`: định tuyến câu trả lời danh mục, làm rõ và giá/tồn kho từ dữ
+  liệu; Gemini tạo lời tư vấn khi cần. Backend xác thực, tách thẻ sản phẩm và
+  giữ cách xử lý lỗi hiện có. Xem [INTENT_ROUTING.md](INTENT_ROUTING.md).
 - `grounding.js`: kiểm tra schema, nguồn sản phẩm, ngân sách và lời văn;
   chuẩn hóa tên/giá đã xác minh về tham chiếu thẻ thay vì chặn nhầm.
 - `metrics.js`: đo từng công đoạn theo request; mặc định không ghi log.

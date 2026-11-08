@@ -4,6 +4,7 @@
   "description": "",
   "main": "server.js",
   "scripts": {
+    "test:chat": "node scripts/run-chat-tests.cjs",
     "test": "node --test --test-concurrency=1 tests/*.test.js",
     "migrate:admin-orders": "node migrations/001-admin-orders.js",
     "migrate:reviews": "node migrations/002-reviews-unique.js",

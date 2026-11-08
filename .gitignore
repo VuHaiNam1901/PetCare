@@ -438,3 +438,6 @@ playwright-report/
 coverage/
 backups/
 *.log
+.codex-chatbot-validation/
+frontend/chat-test-results/
+frontend/voucher-test-results/

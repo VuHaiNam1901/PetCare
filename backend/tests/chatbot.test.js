@@ -266,9 +266,14 @@ test('UC13: out-of-stock recommendation is rejected while availability can show 
     assert.equal(recommendation.code, 'NO_PRODUCTS');
     assert.deepEqual(recommendation.products, []);
     assert.equal(generate.calls.length, 0);
-    const answer = await createAssistant({ repository: repositoryFor([row]), generate: planner(validPlan([1], { advice: 'Bạn xem thông tin hiện có trong thẻ sản phẩm bên dưới nhé.' })) }).reply({ message: 'Sản phẩm này còn hàng không?', mode: 'product' });
+    const factualGenerate = planner(validPlan([1], { advice: 'Bạn xem thông tin hiện có trong thẻ sản phẩm bên dưới nhé.' }));
+    const answer = await createAssistant({ repository: repositoryFor([row]), generate: factualGenerate }).reply({ message: 'Sản phẩm này còn hàng không?', mode: 'product',
+        history: [{ role: 'assistant', text: 'Bạn xem sản phẩm trong thẻ bên dưới nhé.', product_ids: [1], search: { query: 'thức ăn cho chó' } }] });
     assert.equal(answer.code, 'OK');
     assert.equal(answer.products[0].stock_quantity, 0);
+    assert.equal(answer.products[0].available, false);
+    assert.match(answer.message, /giá và tồn kho|thẻ sản phẩm/);
+    assert.equal(factualGenerate.calls.length, 0);
 });
 test('UC13: generation errors return nonblank fallbacks without raw private errors', async () => {
     for (const mode of ['product', 'care']) {
