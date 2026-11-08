@@ -6,7 +6,7 @@ async function migrate(pool) {
     let namedLock = false;
     try {
         const [[lock]] = await db.query("SELECT GET_LOCK('petcare_uc14_migration', 0) AS acquired");
-        if (lock.acquired !== 1) throw new Error('Another review migration is running');
+        if (lock.acquired !== 1 && lock.acquired !== '1') throw new Error('Another review migration is running');
         namedLock = true;
         await db.query('LOCK TABLES reviews WRITE');
         locked = true;

@@ -42,7 +42,9 @@ direct SQL writers otherwise can create duplicates. Additions encountering
 pre-existing duplicate product rows fail with 409 rather than silently deleting
 or rewriting data. Deadlocks/timeouts return 409 for client retry.
 
-Run `npm test` in backend. Cart tests use two unique temporary accounts, exercise
+Run `npm test` in backend. The runner uses a separate disposable database with
+synthetic data; it never writes the configured application database. Direct
+`node --test` without the isolation guard is rejected. Cart tests use two unique temporary accounts, exercise
 simultaneous additions and access isolation, and remove their carts/items/users
 in finally. Full product/category snapshots verify that catalog data and stock
 remain unchanged. Existing unavailable-product status is tested only when such

@@ -40,7 +40,7 @@ test('cart integration: ownership, validation, concurrency and unchanged catalog
                 assert.equal((await request(path, method, body, token)).status, 401);
             }
         }
-        assert.deepEqual((await request('/api/cart')).data.cart, { cart_id: null, items: [], total_quantity: 0, subtotal: '0.00' });
+        assert.deepEqual((await request('/api/cart')).data.cart, { cart_id: null, items: [], total_quantity: 0, subtotal: '0.00', selected_subtotal: '0.00', selected_quantity: 0, selected_count: 0 });
         // Simultaneous requests exercise cart creation and item insertion without UNIQUE(cart_id,product_id).
         const additions = await Promise.all(Array.from({ length: 5 }, () => request('/api/cart/items', 'POST', { product_id: product.product_id, quantity: 1 })));
         additions.forEach(result => assert.equal(result.status, 200));

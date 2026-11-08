@@ -30,8 +30,7 @@ test('simulated payment: approval, retry, concurrency, ownership, rollback and U
     async function create(productId, method = 'ONLINE') {
         const cart = await request('/api/cart/items', 'POST', { product_id: productId, quantity: 1 });
         assert.equal(cart.status, 200);
-        const id = cart.data.cart.items.find(item => item.product_id === productId).cart_item_id;
-        const response = await request('/api/orders', 'POST', { cart_item_ids: [id], shipping_address: '123 Simulation Test Street', phone: '0123456789', payment_method: method }, accounts[0].token, randomUUID());
+        const response = await request('/api/orders', 'POST', { source: 'cart', items: [{ product_id: productId, quantity: 1 }], recipient_name: 'Payment Test', shipping_address: '123 Simulation Test Street', phone: '0123456789', payment_method: method }, accounts[0].token, randomUUID());
         assert.equal(response.status, 201);
         return response.data.order;
     }
@@ -132,9 +131,8 @@ test('simulated payment: approval, retry, concurrency, ownership, rollback and U
         const cancelFailed = await create(product.product_id);
         assert.equal((await approve(cancelFailed)).status, 200);
         assert.equal((await simulate(cancelFailed, 'ONLINE_FAILURE')).status, 200);
-        assert.equal((await status(cancelFailed, 'Đã hủy')).status, 200);
-        assert.equal((await paymentInfo(cancelFailed)).data.payment.payment_status, 'Đã hủy');
-        assert.equal((await simulate(cancelFailed)).status, 409);
+        assert.equal((await status(cancelFailed, 'Đã hủy')).status, 409, 'Approved orders cannot be rejected after a failed payment');
+        assert.equal((await paymentInfo(cancelFailed)).data.payment.payment_status, 'Thất bại');
         // UC18 and UC15 share the same order/payment lock protocol.
         const racedOrder = await create(product.product_id);
         assert.equal((await approve(racedOrder)).status, 200);
@@ -142,7 +140,8 @@ test('simulated payment: approval, retry, concurrency, ownership, rollback and U
         assert.equal(raced.filter(result => result.status === 200).length, 1);
         assert.equal(raced.filter(result => result.status === 409).length, 1);
         const racedInfo = (await paymentInfo(racedOrder)).data.payment;
-        assert.ok((racedInfo.payment_status === 'Đã thanh toán' && racedInfo.order_status === 'Chờ giao hàng') || (racedInfo.payment_status === 'Đã hủy' && racedInfo.order_status === 'Đã hủy'));
+        assert.equal(racedInfo.payment_status, 'Đã thanh toán');
+        assert.equal(racedInfo.order_status, 'Chờ giao hàng');
         // COD still requires explicit cash confirmation on delivery.
         assert.equal((await status(cod, 'Đang giao hàng')).status, 200);
         assert.equal((await status(cod, 'Đã giao hàng')).status, 409);
@@ -150,7 +149,7 @@ test('simulated payment: approval, retry, concurrency, ownership, rollback and U
         const detail = await request(`/api/orders/${retry.order_id}`);
         assert.equal(detail.data.order.payment_status, 'Đã thanh toán');
         assert.equal(detail.data.order.status, 'Chờ giao hàng');
-        console.log('Payment concurrency, retry, failed-payment cancellation, COD regression and real SQL rollback verified.');
+        console.log('Payment concurrency, retry, rejection blocked after approval, COD regression and real SQL rollback verified.');
     } finally {
         pool.getConnection = originalGetConnection;
         const db = await pool.getConnection();

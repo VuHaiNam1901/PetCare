@@ -1,3 +1,118 @@
+Stage 1 code-review addition: [STAGE1_ORDER_FOUNDATION.md](STAGE1_ORDER_FOUNDATION.md)
+describes version 2 Online approval after payment and paid rejection with a
+pending refund request. The workflow is disabled by default; the rules below
+remain applicable to legacy orders and COD.
+
+Admin order management — current implementation
+==============================================
+
+The website now uses the existing JWT login and current database role. Admin
+list/detail/action pages call the endpoints below; the backend independently
+checks active Admin access, including a role recheck inside each transaction.
+No default Admin account or password is created.
+
+Current API contract
+--------------------
+- GET /api/admin/orders?page=1&limit=20&q=...&status=...&approval=pending
+  `q` searches an exact numeric order ID (optional #) or a literal phone substring.
+  `%`, `_` and `=` in phone search are escaped, not interpreted as wildcards.
+  `approval` optionally accepts pending, approved or rejected. Status filtering
+  uses the existing six database values. Pagination count and rows use one
+  transaction snapshot; limit is 1-100. Unknown query fields are rejected.
+- GET /api/admin/orders/:id returns the saved recipient, address, note, historical
+  detail quantities/prices/subtotals, payment, approval, rejection reason and
+  recorded history. List rows use the same shape. No current product price is
+  used to recalculate an order.
+- PATCH /api/admin/orders/:id/approve with {} approves an unapproved pending
+  order. COD becomes Chờ giao hàng; ONLINE remains Chờ thanh toán with
+  approved_at set and payment still Chưa thanh toán.
+- PATCH /api/admin/orders/:id/reject with {"reason":"..."} rejects ONLY an
+  unapproved pending order. Reason is 1-500 valid Unicode scalar values after
+  trimming, with newlines allowed. It is stored separately from the customer
+  note, shown to the customer and recorded in history. The database status stays
+  Đã hủy, mapped to the more precise Từ chối label when rejection_reason exists.
+- PATCH /api/admin/orders/:id/status with {"status":"Đang giao hàng"} or
+  {"status":"Đã giao hàng"} performs exactly one valid delivery step. For COD
+  delivery, cod_payment_received:true is mandatory and cash payment is recorded
+  in the same transaction. Admin cannot advance Online from Chờ thanh toán to
+  Chờ giao hàng; only successful system payment confirmation can do that.
+
+Every order includes approval_state (pending/approved/rejected/legacy),
+allowed_actions (approve/reject/ship/deliver), review_required and review_reason.
+The UI uses these server decisions; disabled/absent actions are not authorization.
+Order/payment state inconsistencies fail closed with 409. Exact repeated
+approvals, delivery steps and same-reason rejections are no-ops; no extra audit
+event or inventory movement is generated. Conflicting rejection reasons fail.
+Unapproved orders may not skip approval, reverse steps or change payment fields.
+The earlier cancellation rules described below are superseded: approved orders
+cannot be rejected/cancelled by these Admin endpoints, even if still unpaid.
+
+Inventory and concurrency
+-------------------------
+Checkout already deducts the selected quantities when it commits a real order.
+This is the reservation: approval MUST NOT deduct again or compare a zero free
+balance with quantities already held by this order. New orders record the actual
+stock_reserved_at and stock_reservation_source=checkout-v5 atomically with the
+deduction. Approval locks the order/payment, all detail rows and product rows in
+product-ID order, checks positive reserved quantities and valid nonnegative
+available stock, and keeps the original receipt prices unchanged. Inventory
+data requiring review returns 409 with product details where available.
+
+Pending rejection restores the held quantities exactly once, records
+stock_restored_at and rejection_reason, changes order/payment to Đã hủy and
+appends history in ONE transaction. No cart recreation occurs. Approve/reject
+races serialize on the order lock: exactly one outcome can win. An error after
+any stock/payment/history write rolls the entire transaction back. Repeated
+requests from another Admin use the same locked state, not local process memory.
+
+Migration 005 and existing data
+------------------------------
+From backend, stop old backend writers and run:
+
+    npm.cmd run migrate:order-management
+
+Then start the updated backend. The additive rerunnable migration backs up ALL
+base tables, verifies the backup SHA-256, adds nullable rejection_reason,
+stock_reserved_at and stock_reservation_source, and creates order_status_history.
+It never rewrites old order status, totals, prices, notes or inventory.
+
+Existing pending orders are reconciled only when their canonical saved items,
+recipient/address/phone/note and payment method exactly reproduce the SHA-256
+request fingerprint of the Checkout v4 writer (and replay-key hash exists).
+That writer reserved inventory atomically at creation, so proven rows receive
+stock_reservation_source=checkout-v4-fingerprint. Their stock_reserved_at stays
+NULL: no reservation time is invented. The migration reports the number proven
+and the number still requiring inventory review. Unproven legacy rows remain
+readable, but cannot be approved, restored or paid until an evidence-based
+inventory audit is performed separately; there is no repair UI in this change.
+Never populate a reservation marker merely to make the buttons available.
+
+History contains history_id, from_status, to_status, action, actor_id,
+actor_name (snapshot), created_at and reason. Events are created in the same
+transaction for new Checkout creation, approval, rejection, delivery and the
+existing payment confirmation mechanism. Actor names and reasons preserve
+Unicode. Legacy transitions are not backfilled or assigned invented times.
+Customers can read only their own order/history through the existing owner-
+scoped API. GET payment also returns current approval_state/rejection_reason
+and refuses eligibility when reservation/order/payment data needs review.
+This change does not create a payment gateway or add simulation UI/actions.
+
+Verification commands
+---------------------
+    npm.cmd run test:admin-orders
+    npm.cmd test
+
+The runner clones schema only into a random disposable database, seeds synthetic
+rows, verifies migration preservation, fingerprint proof, unknown legacy behavior,
+no manufactured history and stable reruns, then runs SQL tests. The configured
+application database receives no test writes. Tests cover JWT/current-role
+authorization, pending COD/Online, reserved free-stock zero, search/pagination,
+cash confirmation, duplicate/two-Admin races, invalid transitions, pending-only
+Unicode rejection, stock restoration, shortage/overselling and real SQL rollback.
+
+Historical implementation notes (superseded where stated above)
+==============================================================
+
 UC18: Admin order management
 ===========================
 
@@ -94,7 +209,9 @@ verified; a full disaster-recovery restore has not been executed here.
 
 Verification
 ------------
-npm test runs serial MySQL integration tests. Temporary accounts include one
+npm test runs serial MySQL integration tests in a disposable test database with
+synthetic rows. The configured application database is used only for schema
+metadata, with no test writes. Temporary accounts include one
 temporary role elevation for testing; all are deleted. Tests verify old API
 behavior, same-user concurrent/repeated checkout, cross-user key reuse, the
 database UNIQUE itself, legacy metadata migration and replay, JWT/admin guards,

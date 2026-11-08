@@ -59,11 +59,11 @@ test('orders: partial checkout, payments, durable replay, rollback, history and 
         }
         const first = await add(products[0].product_id);
         const second = await add(products[1].product_id, 2);
-        const payload = { cart_item_ids: [first], shipping_address: '123 Test Street', phone: '+84123456789', payment_method: 'COD', note: 'Test delivery' };
+        const payload = { source: 'cart', items: [{ product_id: products[0].product_id, quantity: 1 }], recipient_name: 'Order Test', shipping_address: '123 Test Street', phone: '+84123456789', payment_method: 'COD', note: 'Test delivery' };
         for (const token of [null, 'bad', jwt.sign({}, process.env.JWT_SECRET, { subject: String(accounts[0].id), expiresIn: -1 })]) {
             for (const [path, method, body] of [['/api/orders', 'POST', payload], ['/api/orders', 'GET'], ['/api/orders/1', 'GET']]) assert.equal((await request(path, method, body, randomUUID(), token)).status, 401);
         }
-        for (const changes of [{ shipping_address: '' }, { phone: '------' }, { payment_method: 'CASH' }, { user_id: accounts[1].id }, { total_amount: 1 }, { status: 'paid' }, { cart_item_ids: [] }, { cart_item_ids: [first, first] }, { cart_item_ids: ['1'] }]) {
+        for (const changes of [{ shipping_address: '' }, { phone: '------' }, { payment_method: 'CASH' }, { user_id: accounts[1].id }, { total_amount: 1 }, { status: 'paid' }, { cart_item_ids: [first] }, { items: [] }, { items: [...payload.items, ...payload.items] }, { items: [{ product_id: '1', quantity: 1 }] }]) {
             assert.equal((await request('/api/orders', 'POST', { ...payload, ...changes }, randomUUID())).status, 400);
         }
         assert.equal((await request('/api/orders', 'POST', payload)).status, 400);
@@ -88,11 +88,11 @@ test('orders: partial checkout, payments, durable replay, rollback, history and 
         assert.equal((await request('/api/orders', 'POST', payload, randomUUID())).status, 409);
         assert.equal((await request(`/api/orders/${order.order_id}`, 'GET', undefined, undefined, accounts[1].token)).status, 404);
         assert.equal((await request('/api/orders', 'GET', undefined, undefined, accounts[1].token)).data.total, 0);
-        assert.equal((await request('/api/orders', 'POST', { ...payload, cart_item_ids: [second] }, randomUUID(), accounts[1].token)).status, 409);
+        assert.equal((await request('/api/orders', 'POST', { ...payload, items: [{ product_id: products[1].product_id, quantity: 2 }] }, randomUUID(), accounts[1].token)).status, 409);
 
         // Inject failure after header, details and stock updates, at payment insert.
         const [[stockBefore]] = await pool.execute('SELECT stock_quantity FROM products WHERE product_id = ?', [products[1].product_id]);
-        const online = { ...payload, cart_item_ids: [second], payment_method: 'ONLINE' };
+        const online = { ...payload, items: [{ product_id: products[1].product_id, quantity: 2 }], payment_method: 'ONLINE' };
         const rollbackKey = randomUUID();
         const failed = await injected(async (sql, params, execute) => {
             if (sql.startsWith('INSERT INTO payments')) throw new Error('Simulated payment storage failure');
@@ -117,8 +117,9 @@ test('orders: partial checkout, payments, durable replay, rollback, history and 
         assert.equal(onlineOrder.data.order.payment_status, 'Chưa thanh toán');
         assert.equal(onlineOrder.data.order.total_amount, (Number(products[1].price) * 2).toFixed(2));
 
-        const items = [await add(products[0].product_id), await add(products[1].product_id)];
-        const multi = await request('/api/orders', 'POST', { ...payload, cart_item_ids: items }, randomUUID());
+        await add(products[0].product_id);
+        await add(products[1].product_id);
+        const multi = await request('/api/orders', 'POST', { ...payload, items: products.slice(0, 2).map(product => ({ product_id: product.product_id, quantity: 1 })) }, randomUUID());
         assert.equal(multi.status, 201);
         assert.equal(multi.data.order.items.length, 2);
         assert.equal((await request('/api/cart')).data.cart.items.length, 0);

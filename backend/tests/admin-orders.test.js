@@ -40,12 +40,12 @@ test('admin orders: migration, access, approval, transitions, cancellation races
     }
     const approve = order => request(`/api/admin/orders/${order.order_id}/approve`, 'PATCH', {});
     const status = (order, target, extra = {}) => request(`/api/admin/orders/${order.order_id}/status`, 'PATCH', { status: target, ...extra });
+    const reject = order => request(`/api/admin/orders/${order.order_id}/reject`, 'PATCH', { reason: 'Không thể tiếp nhận đơn kiểm thử.\nVui lòng liên hệ cửa hàng.' });
     const stock = async productId => (await pool.execute('SELECT stock_quantity FROM products WHERE product_id = ?', [productId]))[0][0].stock_quantity;
     async function create(productId, quantity = 1, method = 'COD', account = accounts[0], key = randomUUID(), concurrent = false) {
         const added = await request('/api/cart/items', 'POST', { product_id: productId, quantity }, account.token);
         assert.equal(added.status, 200);
-        const itemId = added.data.cart.items.find(item => item.product_id === productId).cart_item_id;
-        const body = { cart_item_ids: [itemId], shipping_address: '123 Admin Test Street', phone: '0123456789', payment_method: method, note: 'Keep this note' };
+        const body = { source: 'cart', items: [{ product_id: productId, quantity }], recipient_name: 'Admin Order Test', shipping_address: '123 Admin Test Street', phone: '0123456789', payment_method: method, note: 'Keep this note' };
         const checkout = () => request('/api/orders', 'POST', body, account.token, key);
         const results = await Promise.all(Array.from({ length: concurrent ? 4 : 1 }, checkout));
         assert.equal(results.filter(result => result.status === 201).length, 1);
@@ -142,19 +142,31 @@ test('admin orders: migration, access, approval, transitions, cancellation races
 
         const beforeRace = await stock(products[0].product_id);
         const { order: race } = await create(products[0].product_id, 3);
-        const raced = await Promise.all([approve(race), status(race, 'Đã hủy'), status(race, 'Đã hủy')]);
-        assert.ok([200, 409].includes(raced[0].status));
-        assert.equal(raced[1].status, 200);
-        assert.equal(raced[2].status, 200);
-        assert.equal(await stock(products[0].product_id), beforeRace);
-        const cancelled = (await request(`/api/admin/orders/${race.order_id}`)).data.order;
+        const raced = await Promise.all([approve(race), reject(race), reject(race)]);
+        assert.ok(raced.every(result => [200, 409].includes(result.status)));
+        const raceResult = (await request(`/api/admin/orders/${race.order_id}`)).data.order;
+        if (raceResult.status === 'Đã hủy') {
+            assert.equal(raced[0].status, 409);
+            assert.equal(raced[1].status, 200);
+            assert.equal(raced[2].status, 200);
+            assert.equal(await stock(products[0].product_id), beforeRace);
+        } else {
+            assert.equal(raced[0].status, 200);
+            assert.equal(raced[1].status, 409);
+            assert.equal(raced[2].status, 409);
+            assert.equal(await stock(products[0].product_id), beforeRace - 3);
+        }
+        const { order: rejectedOrder } = await create(products[0].product_id, 2);
+        const beforeReject = await stock(products[0].product_id);
+        assert.equal((await reject(rejectedOrder)).status, 200);
+        const cancelled = (await request(`/api/admin/orders/${rejectedOrder.order_id}`)).data.order;
         assert.equal(cancelled.status, 'Đã hủy');
         assert.equal(cancelled.payment_status, 'Đã hủy');
         assert.ok(cancelled.stock_restored_at);
-        await status(race, 'Đã hủy');
-        assert.equal(await stock(products[0].product_id), beforeRace);
-        assert.equal((await approve(race)).status, 409);
-        assert.equal((await status(online, 'Đã hủy')).status, 200);
+        await reject(rejectedOrder);
+        assert.equal(await stock(products[0].product_id), beforeReject + 2);
+        assert.equal((await approve(rejectedOrder)).status, 409);
+        assert.equal((await reject(online)).status, 409);
 
         // Inject a payment-update failure after a real cancellation stock update.
         const { order: rollbackOrder } = await create(products[1].product_id, 1, 'ONLINE');
@@ -170,19 +182,20 @@ test('admin orders: migration, access, approval, transitions, cancellation races
             db.release = () => { db.execute = execute; db.release = release; release(); };
             return db;
         };
-        try { assert.equal((await status(rollbackOrder, 'Đã hủy')).status, 500); }
+        try { assert.equal((await reject(rollbackOrder)).status, 500); }
         finally { pool.getConnection = originalGetConnection; }
         assert.equal(await stock(products[1].product_id), beforeRollback);
         const rolledBack = (await request(`/api/admin/orders/${rollbackOrder.order_id}`)).data.order;
         assert.equal(rolledBack.status, 'Chờ thanh toán');
         assert.equal(rolledBack.stock_restored_at, null);
         assert.equal(rolledBack.payment_status, 'Chưa thanh toán');
-        assert.equal((await status(rollbackOrder, 'Đã hủy')).status, 200);
+        assert.equal((await reject(rollbackOrder)).status, 200);
 
         // Test-only paid ONLINE fixture; no payment API or simulated payment is added.
         const { order: paidOnline } = await create(products[1].product_id, 1, 'ONLINE');
         assert.equal((await approve(paidOnline)).status, 200);
         await pool.execute('UPDATE payments SET payment_status = ?, transaction_date = NOW() WHERE order_id = ?', ['Đã thanh toán', paidOnline.order_id]);
+        await pool.execute('UPDATE orders SET status = ? WHERE order_id = ?', ['Chờ giao hàng', paidOnline.order_id]);
         assert.equal((await status(paidOnline, 'Đã hủy')).status, 409);
         assert.equal((await status(paidOnline, 'Chờ giao hàng')).status, 200);
         assert.equal((await status(paidOnline, 'Đang giao hàng')).status, 200);

@@ -1,10 +1,17 @@
 const pool = require('../config/db');
+const { append: appendHistory } = require('./order-history');
+const { approvalState, consistent } = require('./order-policy');
+const workflow = require('../config/order-workflow');
+const clock = require('./order-time');
 
 const fail = (status, message) => { throw Object.assign(new Error(message), { status }); };
 
 function rejection(order, payment) {
     if (payment.payment_method !== 'ONLINE') return 'Only ONLINE orders support simulated payment';
-    if (!order.approval_valid) return 'Admin approval is required before payment';
+    try { consistent(order, payment); } catch (error) { return error.message; }
+    if (order.workflow_version === workflow.VERSION) {
+        if (!order.payment_window_open) return 'Payment deadline has expired';
+    } else if (!order.approval_valid) return 'Admin approval is required before payment';
     if (order.status !== 'Chờ thanh toán' || order.stock_restored_at) return 'Order is not awaiting payment';
     if (!['Chưa thanh toán', 'Thất bại'].includes(payment.payment_status)) return 'Payment is already completed or unavailable';
     if (payment.transaction_date || payment.amount !== order.total_amount) return 'Order/payment data needs review';
@@ -12,26 +19,35 @@ function rejection(order, payment) {
 }
 
 function view(order, payment) {
+    let simulationAllowed = true;
+    try { workflow.assertSimulationAllowed(); } catch { simulationAllowed = false; }
     return {
         payment_id: payment.payment_id, order_id: order.order_id,
         payment_method: payment.payment_method, payment_status: payment.payment_status,
         amount: payment.amount, transaction_date: payment.transaction_date,
         created_at: payment.created_at, order_status: order.status,
-        approved_at: order.approved_at, can_simulate: rejection(order, payment) === null,
+        approved_at: order.approved_at, can_simulate: simulationAllowed && rejection(order, payment) === null,
+        approval_state: approvalState({ ...order, payment_method: payment.payment_method }),
+        rejection_reason: order.rejection_reason,
         simulation_only: true
     };
 }
 
 async function information(db, userId, orderId) {
     // One statement gives a consistent order/payment snapshot without locking GETs.
-    const [[row]] = await db.execute(`SELECT o.order_id, o.total_amount, o.status,
-        o.approved_at, o.stock_restored_at,
-        (o.approved_at IS NOT NULL AND o.approved_at > '1000-01-01' AND o.approved_at <= NOW()) AS approval_valid,
+    const [[row]] = await db.execute(`SELECT o.*${clock.selectOrderClock('o')}${clock.selectPaymentClock('p')},
         p.payment_id, p.payment_method, p.payment_status, p.amount, p.transaction_date, p.created_at
         FROM orders o LEFT JOIN payments p ON p.order_id = o.order_id
         WHERE o.order_id = ? AND o.user_id = ?`, [orderId, userId]);
     if (!row) fail(404, 'Order not found');
+    clock.normalizeOrderClock(row);
     if (!row.payment_id) fail(409, 'Payment record is missing; order needs review');
+    if (row.workflow_version === workflow.VERSION) {
+        const [[window]] = await db.execute('SELECT payment_expires_at > UTC_TIMESTAMP(3) AS payment_window_open FROM orders WHERE order_id = ?', [orderId]);
+        row.payment_window_open = Boolean(window.payment_window_open);
+        return { ...view(row, row), workflow_version: row.workflow_version, payment_expires_at: row.payment_expires_at,
+            refunds: await require('../services/online-orders').readRefunds(db, orderId) };
+    }
     return view(row, row);
 }
 
@@ -41,16 +57,28 @@ exports.simulate = async (userId, orderId, testCase) => {
     // Fixed synthetic cases only; no card, OTP, amount or status is accepted.
     const cases = { ONLINE_SUCCESS: 'success', ONLINE_FAILURE: 'failure' };
     if (!Object.hasOwn(cases, testCase)) fail(400, 'Invalid simulation test case');
+    // Financial simulation is never allowed against application data, including
+    // legacy orders. This endpoint remains available only in isolated tests.
+    workflow.assertSimulationAllowed();
+    const current = await information(pool, userId, orderId);
+    if (current.workflow_version === workflow.VERSION) {
+        const result = await require('../services/online-orders').simulate(userId, orderId, testCase);
+        return { simulated: true, outcome: cases[testCase], ...result, payment: await information(pool, userId, orderId) };
+    }
     const db = await pool.getConnection();
     try {
+        const [[selected]] = await db.query('SELECT DATABASE() AS database_name');
+        if (selected.database_name !== process.env.PETCARE_TEST_DATABASE || selected.database_name !== process.env.DB_NAME) {
+            throw Object.assign(new Error('Payment simulation requires the selected isolated test database'), { status: 503 });
+        }
         await db.beginTransaction();
-        const [[user]] = await db.execute('SELECT role, status FROM `user` WHERE user_id = ? FOR SHARE', [userId]);
+        const [[user]] = await db.execute('SELECT role, status, full_name FROM `user` WHERE user_id = ? FOR SHARE', [userId]);
         if (!user || user.role !== 'user' || user.status !== 'active') fail(403, 'Active user account required');
         // Same order -> payment lock order as UC18, so cancellation and payment
         // cannot both succeed, and concurrent success is recorded only once.
-        const [[order]] = await db.execute(`SELECT *,
-            (approved_at IS NOT NULL AND approved_at > '1000-01-01' AND approved_at <= NOW()) AS approval_valid
+        const [[storedOrder]] = await db.execute(`SELECT *${clock.selectOrderClock('')}
             FROM orders WHERE order_id = ? AND user_id = ? FOR UPDATE`, [orderId, userId]);
+        const order = clock.normalizeOrderClock(storedOrder);
         if (!order) fail(404, 'Order not found');
         const [[payment]] = await db.execute('SELECT * FROM payments WHERE order_id = ? FOR UPDATE', [orderId]);
         if (!payment) fail(409, 'Payment record is missing; order needs review');
@@ -60,6 +88,9 @@ exports.simulate = async (userId, orderId, testCase) => {
         const succeeded = outcome === 'success';
         await db.execute(`UPDATE payments SET payment_status = ?, transaction_date = ${succeeded ? 'NOW()' : 'NULL'} WHERE order_id = ?`, [succeeded ? 'Đã thanh toán' : 'Thất bại', orderId]);
         await db.execute('UPDATE orders SET status = ? WHERE order_id = ?', [succeeded ? 'Chờ giao hàng' : 'Chờ thanh toán', orderId]);
+        await appendHistory(db, { orderId, fromStatus: order.status,
+            toStatus: succeeded ? 'Chờ giao hàng' : 'Chờ thanh toán', action: succeeded ? 'payment' : 'payment_failed',
+            actorId: userId, actorName: user.full_name });
         const result = await information(db, userId, orderId);
         await db.commit();
         return { simulated: true, outcome, payment: result };

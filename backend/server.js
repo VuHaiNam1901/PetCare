@@ -24,6 +24,8 @@ app.use('/api/chat', createChatRouter());
 app.use('/api/cart', cartRoutes);
 app.use('/api/orders', orderRoutes);
 app.use('/api/admin/orders', adminOrderRoutes);
+app.use('/api/admin/vouchers', require('./routes/admin-vouchers'));
+app.use('/api/vouchers', require('./routes/vouchers'));
 app.use('/api/admin/users', adminUserRoutes);
 app.use('/api/admin', adminCatalogRoutes);
 
@@ -147,7 +149,37 @@ app.use((error, req, res, next) => {
     res.status(500).json({ success: false, message: 'Internal server error' });
 });
 
-if (require.main === module) app.listen(PORT, () => {
+async function start() {
+    const workflow = require('./config/order-workflow');
+    const config = workflow.settings();
+    if (config.enabled) workflow.assertWorkflowCreationAllowed();
+    if (config.enabled || config.expiryEnabled) {
+        // Readiness only: startup never applies migrations or repairs data.
+        await require('./services/online-orders').assertReady(pool);
+    }
+    if (require('./config/vouchers').enabled()) await require('./models/voucher').assertReady(pool);
+    const lifecycle = require('./server-lifecycle');
+    // Bind errors reject before an expiry worker is allowed to run.
+    const server = await lifecycle.listen(app, PORT);
     console.log(`Server is running at http://localhost:${PORT}`);
+    const worker = config.expiryEnabled
+        ? require('./workers/order-expiry').startOrderExpiryWorker({ service: require('./services/online-orders'), logger: console }) : null;
+    let shuttingDown = false;
+    const shutdown = () => {
+        if (shuttingDown) return;
+        shuttingDown = true;
+        lifecycle.close(server, worker, pool).catch(error => {
+            console.error('[ORDER WORKFLOW SHUTDOWN]', error.code || 'SHUTDOWN_FAILED');
+            process.exitCode = 1;
+        });
+    };
+    process.once('SIGTERM', shutdown);
+    process.once('SIGINT', shutdown);
+    return server;
+}
+if (require.main === module) start().catch(error => {
+    console.error('[ORDER WORKFLOW STARTUP]', error.code || 'READINESS_FAILED');
+    process.exitCode = 1;
+    pool.end();
 });
 module.exports = app;

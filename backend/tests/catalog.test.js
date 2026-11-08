@@ -86,7 +86,7 @@ test('admin catalog: validation, references, search, history preservation and cl
         // Order and cart references are created only against temporary products.
         const cart = await request('/api/cart/items', 'POST', { product_id: productId, quantity: 2 }, accounts[1].token);
         assert.equal(cart.status, 200);
-        const order = await request('/api/orders', 'POST', { cart_item_ids: [cart.data.cart.items[0].cart_item_id], shipping_address: '123 Catalog Test Street', phone: '0123456789', payment_method: 'COD' }, accounts[1].token, randomUUID());
+        const order = await request('/api/orders', 'POST', { source: 'cart', items: [{ product_id: productId, quantity: 2 }], recipient_name: 'Catalog Test', shipping_address: '123 Catalog Test Street', phone: '0123456789', payment_method: 'COD' }, accounts[1].token, randomUUID());
         assert.equal(order.status, 201);
         const orderId = order.data.order.order_id;
         const [[originalOrder]] = await pool.execute('SELECT * FROM orders WHERE order_id = ?', [orderId]);
@@ -122,7 +122,7 @@ test('admin catalog: validation, references, search, history preservation and cl
         assert.equal((await request(`/api/admin/categories/${categoryId}`, 'DELETE')).status, 409);
         assert.equal((await request('/api/cart/items', 'POST', { product_id: productId, quantity: 1 }, accounts[1].token)).status, 409);
         assert.equal((await request(`/api/cart/items/${heldItemId}`, 'PUT', { quantity: 2 }, accounts[1].token)).status, 409);
-        const refusedOrder = await request('/api/orders', 'POST', { cart_item_ids: [heldItemId], shipping_address: '123 Catalog Test Street', phone: '0123456789', payment_method: 'COD' }, accounts[1].token, randomUUID());
+        const refusedOrder = await request('/api/orders', 'POST', { source: 'cart', items: [{ product_id: productId, quantity: 1 }], recipient_name: 'Catalog Test', shipping_address: '123 Catalog Test Street', phone: '0123456789', payment_method: 'COD' }, accounts[1].token, randomUUID());
         assert.equal(refusedOrder.status, 409);
         assert.match(refusedOrder.data.message, /not available for sale/i);
         const [[remainingProduct]] = await pool.execute('SELECT stock_quantity FROM products WHERE product_id = ?', [productId]);

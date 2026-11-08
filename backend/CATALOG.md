@@ -60,7 +60,8 @@ Admins may edit stock as an absolute inventory value under a row lock.
 
 Tests
 -----
-npm test creates temporary categories/products/accounts. It checks all eight
+npm test creates temporary categories/products/accounts in a separate disposable
+test database, never in the configured application database. It checks all eight
 Admin guards, add/edit/list/search/filter/pagination, zero/invalid prices and
 stock, invalid categories/status/image paths, duplicate names, stop/reactivate,
 order/cart/review reference retention, unchanged saved order/payment records,
