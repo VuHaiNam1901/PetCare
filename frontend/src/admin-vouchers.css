@@ -1,0 +1,33 @@
+.admin-vouchers-page { --color-primary: #1677B8; --color-primary-hover: #12659D; --color-section: #EAF6FF; }
+.admin-vouchers-page .admin-vouchers-filters { grid-template-columns: minmax(180px, 1.4fr) minmax(145px, 1fr) auto; background: #EAF6FF; }
+.admin-vouchers-page .admin-products-table { min-width: 1020px; }
+.admin-vouchers-page .admin-products-table th:first-child { width: 18%; }
+.admin-vouchers-page .admin-products-table th:last-child { width: 205px; }
+.admin-vouchers-page .admin-vouchers-code { display: block; color: #1677B8; overflow-wrap: anywhere; }
+.admin-vouchers-page .admin-vouchers-subtext { display: block; margin-top: 6px; color: var(--color-muted); font-size: 10px; line-height: 1.7; }
+.admin-vouchers-page .admin-products-badge.admin-vouchers-status-draft { background: #EAF6FF; color: #1677B8; }
+.admin-vouchers-page .admin-products-badge.admin-vouchers-status-disabled { background: #FFF0EE; color: #A4443F; }
+.admin-vouchers-page .admin-vouchers-rule { margin-top: 18px; color: var(--color-muted); font-size: 12px; line-height: 1.8; }
+.admin-vouchers-page .admin-orders-sidebar nav a { min-width: 0; }
+.admin-vouchers-unavailable .button { margin-top: 18px; }
+.admin-vouchers-dialog { width: min(780px, calc(100% - 32px)); }
+.admin-vouchers-dialog .admin-vouchers-timezone { margin: 0; color: var(--color-muted); font-size: 11px; line-height: 1.8; }
+.admin-vouchers-dialog .admin-vouchers-details { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 22px; }
+.admin-vouchers-dialog .admin-vouchers-details > div { min-width: 0; padding: 14px 0; border-bottom: 1px solid var(--color-border); }
+.admin-vouchers-dialog .admin-vouchers-details dt { margin-bottom: 7px; color: var(--color-muted); font-size: 11px; }
+.admin-vouchers-dialog .admin-vouchers-details dd { margin: 0; font-size: 13px; line-height: 1.7; font-weight: 600; overflow-wrap: anywhere; }
+.admin-vouchers-dialog .admin-vouchers-details + .admin-vouchers-timezone { margin-top: 18px; }
+@media (max-width: 1180px) {
+  .admin-vouchers-page .admin-vouchers-filters { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .admin-vouchers-page .admin-products-filter-actions { grid-column: 1 / -1; }
+}
+@media (max-width: 940px) {
+  .admin-vouchers-page .admin-orders-sidebar, .admin-vouchers-page .admin-orders-sidebar nav { flex-wrap: wrap; }
+}
+@media (max-width: 720px) {
+  .admin-vouchers-page .admin-vouchers-filters { grid-template-columns: minmax(0, 1fr); }
+  .admin-vouchers-page .admin-products-table { min-width: 0; }
+  .admin-vouchers-page .admin-orders-sidebar nav a { flex: 1 1 44%; justify-content: flex-start; }
+  .admin-vouchers-dialog { width: calc(100% - 24px); }
+  .admin-vouchers-dialog .admin-vouchers-details { grid-template-columns: minmax(0, 1fr); }
+}

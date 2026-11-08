@@ -6,8 +6,13 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
+    "test:vouchers": "playwright test --config playwright.vouchers.config.js",
     "preview": "vite preview",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "test:checkout": "playwright test --config playwright.checkout.config.js",
+    "test:my-orders": "playwright test --config playwright.my-orders.config.js",
+    "test:order-detail": "playwright test --config playwright.my-orders.config.js tests/order-detail.spec.js",
+    "test:admin-orders": "playwright test --config playwright.admin-orders.config.js"
   },
   "dependencies": {
     "react": "^19.3.1",

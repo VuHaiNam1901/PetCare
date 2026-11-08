@@ -151,10 +151,12 @@ test('responsive ở 390px và 768px, menu điện thoại hoạt động', asyn
   await page.getByRole('button', { name: 'Mở menu', exact: true }).click();
   await expect(page.getByRole('navigation', { name: 'Điều hướng trên điện thoại' })).toBeVisible();
   await page.getByRole('navigation', { name: 'Điều hướng trên điện thoại' }).getByRole('link', { name: 'Sản phẩm', exact: true }).click();
+  await expect(page).toHaveURL(/\/products$/);
+  await expect(page.getByRole('heading', { level: 1, name: 'Danh sách sản phẩm' })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Mở menu', exact: true })).toBeVisible();
   await expect(page.getByRole('navigation', { name: 'Điều hướng trên điện thoại' })).toHaveCount(0);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
-  await prepareScreenshot(page);
+  await page.locator('.product-card').first().scrollIntoViewIfNeeded();
   await page.screenshot({ path: testInfo.outputPath('mobile.png'), fullPage: true });
   await page.setViewportSize({ width: 768, height: 1024 });
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);

@@ -1,0 +1,75 @@
+.profile-page .my-orders-content { min-width: 0; }
+.profile-page .profile-card { min-width: 0; padding: 26px; border: 1px solid var(--color-border); border-radius: 8px; background: #fff; }
+.profile-page .profile-card-heading { display: flex; align-items: flex-start; justify-content: space-between; flex-wrap: wrap; gap: 18px; margin-bottom: 25px; }
+.profile-page .profile-card-heading > div { min-width: 0; }
+.profile-page .profile-card-heading h2 { font-size: 19px; letter-spacing: -.4px; }
+.profile-page .profile-card-heading p { margin-top: 7px; color: var(--color-muted); font-size: 12px; line-height: 1.8; }
+.profile-page .profile-heading-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 9px; }
+.profile-page .profile-heading-actions .button { min-height: 42px; }
+.profile-page .profile-data { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px; margin: 0; }
+.profile-page .profile-data > div { min-width: 0; }
+.profile-page .profile-data-wide { grid-column: 1 / -1; }
+.profile-page .profile-data dt { margin-bottom: 7px; color: var(--color-muted); font-size: 12px; }
+.profile-page .profile-data dd { min-width: 0; margin: 0; color: var(--color-text); font-size: 14px; line-height: 1.8; white-space: pre-wrap; overflow-wrap: anywhere; }
+.profile-page .profile-account-badge { display: inline-flex; align-items: center; width: fit-content; max-width: 100%; gap: 6px; padding: 5px 10px; border-radius: 5px; background: var(--color-section); color: var(--color-primary-hover); font-size: 11px; font-weight: 600; white-space: normal; overflow-wrap: anywhere; }
+.profile-page .profile-success { display: flex; align-items: flex-start; gap: 9px; margin-bottom: 20px; padding: 13px 15px; border: 1px solid #CEEAD7; border-radius: 6px; background: #EAF8EF; color: #236647; font-size: 12px; line-height: 1.8; overflow-wrap: anywhere; }
+.profile-page .profile-success > svg { flex-shrink: 0; margin-top: 2px; }
+.profile-page .profile-error { margin-block: 0 20px; padding: 13px 15px; border: 1px solid #EAC9C2; border-radius: 6px; background: #FFF4F0; color: #9E403C; font-size: 12px; line-height: 1.8; overflow-wrap: anywhere; }
+.profile-page .profile-error > p + p { margin-top: 7px; }
+.profile-page .profile-error > .button { margin-top: 12px; min-height: 42px; }
+.profile-page .profile-loading { display: grid; gap: 20px; min-width: 0; padding: 26px; border: 1px solid var(--color-border); border-radius: 8px; background: #fff; }
+.profile-page .profile-loading > p { color: var(--color-muted); font-size: 12px; }
+.profile-page .profile-loading .skeleton-line { width: 100%; height: 20px; }
+.profile-page .profile-loading .skeleton-line:nth-last-child(2) { width: 80%; }
+.profile-page .profile-loading .skeleton-line:last-child { width: 60%; }
+.profile-page .profile-form > fieldset { min-width: 0; margin: 0; padding: 0; border: 0; }
+.profile-page .profile-form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 22px 20px; }
+.profile-page .profile-field { display: flex; flex-direction: column; gap: 8px; min-width: 0; color: var(--color-text); font-size: 12px; font-weight: 600; }
+.profile-page .profile-field-wide { grid-column: 1 / -1; }
+.profile-page .profile-field input,
+.profile-page .profile-field textarea { display: block; width: 100%; min-width: 0; min-height: 44px; padding: 11px 12px; border: 1px solid #BAD5F3; border-radius: 5px; background: #fff; color: var(--color-text); font: inherit; font-size: 14px; font-weight: 400; }
+.profile-page .profile-field textarea { min-height: 116px; resize: vertical; line-height: 1.8; }
+.profile-page .profile-field textarea:focus-visible { outline: 3px solid var(--color-primary-hover); outline-offset: 3px; }
+.profile-page .profile-field input[aria-invalid='true'],
+.profile-page .profile-field textarea[aria-invalid='true'] { border-color: #B44E45; }
+.profile-page .profile-field input:read-only,
+.profile-page .profile-field textarea:read-only { background: var(--color-page); color: var(--color-muted); }
+.profile-page .profile-field small,
+.profile-page .profile-form-note { color: var(--color-muted); font-size: 11px; font-weight: 400; line-height: 1.8; overflow-wrap: anywhere; }
+.profile-page .profile-field .profile-field-error,
+.profile-page .profile-field-error { color: #9E403C; font-size: 11px; font-weight: 400; line-height: 1.8; overflow-wrap: anywhere; }
+.profile-page .profile-form-note { margin-top: 19px; }
+.profile-page .profile-form-actions { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 10px; margin-top: 25px; padding-top: 22px; border-top: 1px solid var(--color-border); }
+.profile-page .profile-form-actions .button { min-height: 44px; }
+.profile-page .button:disabled,
+.profile-page .profile-form fieldset:disabled { opacity: .65; }
+
+.site-header .header-profile-link { display: inline-flex; flex-shrink: 0; align-items: center; gap: 6px; min-height: 40px; color: var(--color-primary-hover); font-size: 11px; font-weight: 500; }
+.site-header .header-profile-link > svg { flex-shrink: 0; }
+.site-header .header-profile-link > span { white-space: nowrap; }
+.site-header .header-profile-link:hover { text-decoration: underline; text-underline-offset: 3px; }
+
+@media (max-width: 950px) {
+  .site-header .header-profile-link > span { display: none; }
+}
+@media (max-width: 760px) {
+  .profile-page .my-orders-layout { grid-template-columns: minmax(0, 1fr); }
+  .profile-page .profile-card,
+  .profile-page .profile-loading { padding: 21px 18px; }
+  .profile-page .profile-card-heading { gap: 15px; margin-bottom: 22px; }
+  .profile-page .profile-card-heading h2 { font-size: 18px; }
+  .profile-page .profile-data,
+  .profile-page .profile-form-grid { grid-template-columns: minmax(0, 1fr); gap: 21px; }
+  .profile-page .profile-data-wide,
+  .profile-page .profile-field-wide { grid-column: auto; }
+  .profile-page .profile-heading-actions .button { min-height: 42px; }
+}
+@media (max-width: 620px) {
+  .site-header .header-profile-link { display: none; }
+}
+@media (max-width: 420px) {
+  .profile-page .profile-heading-actions { width: 100%; }
+  .profile-page .profile-heading-actions .button { flex: 1; }
+  .profile-page .profile-form-actions { align-items: stretch; }
+  .profile-page .profile-form-actions .button { flex: 1 1 100%; }
+}

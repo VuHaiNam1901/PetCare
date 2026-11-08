@@ -1,5 +1,5 @@
 // Địa chỉ API công khai, không chứa thông tin kết nối database.
-export const API_ORIGIN = 'http://localhost:3000';
+export const API_ORIGIN = (import.meta.env?.VITE_API_ORIGIN ?? 'http://localhost:3000').trim().replace(/\/+$/, '');
 
 export async function fetchCollection(endpoint, collectionKey, signal) {
   let response;

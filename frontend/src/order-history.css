@@ -1,0 +1,15 @@
+.order-history { min-width: 0; padding: 22px; border: 1px solid var(--color-border); border-radius: 8px; background: #fff; }
+.order-history h2 { margin-bottom: 18px; font-size: 16px; }
+.order-history ol { list-style: none; margin: 0; padding: 0; }
+.order-history li { position: relative; padding: 0 0 20px 20px; border-left: 1px solid var(--color-border); overflow-wrap: anywhere; }
+.order-history li::before { position: absolute; content: ''; width: 7px; height: 7px; left: -4px; top: 5px; border-radius: 50%; background: var(--color-primary); }
+.order-history li:last-child { padding-bottom: 0; border-left-color: transparent; }
+.order-history-heading { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 5px 15px; line-height: 1.8; }
+.order-history-heading strong { font-size: 12px; }
+.order-history time, .order-history-status, .order-history-actor, .order-history-empty { color: var(--color-muted); font-size: 11px; line-height: 1.9; }
+.order-history-reason { margin-top: 5px; font-size: 12px; line-height: 1.8; white-space: pre-wrap; }
+.my-order-rejection { margin: 0 20px 16px; padding: 12px; border-radius: 5px; color: #9a4641; background: #fff5f3; font-size: 11px; line-height: 1.8; overflow-wrap: anywhere; white-space: pre-wrap; }
+.order-detail-rejection { margin-bottom: 22px; padding: 18px 22px; color: #9a4641; border: 1px solid #f1d2cf; border-radius: 8px; background: #fff5f3; }
+.order-detail-rejection h2 { margin-bottom: 8px; font-size: 15px; }
+.order-detail-rejection p { font-size: 12px; line-height: 1.9; white-space: pre-wrap; overflow-wrap: anywhere; }
+@media (max-width: 620px) { .order-history { padding: 18px 16px; } .order-detail-rejection { padding: 18px 16px; } .my-order-rejection { margin-inline: 14px; } }

@@ -1,0 +1,47 @@
+.admin-users-page .admin-users-filters { grid-template-columns: minmax(180px, 1fr) 180px auto; }
+.admin-users-page .admin-products-table { min-width: 760px; }
+.admin-users-page .admin-products-table th:first-child { width: 32%; }
+.admin-users-page .admin-products-table th:nth-child(2) { width: 30%; }
+.admin-users-page .admin-products-table td.admin-products-product-cell { display: table-cell; }
+.admin-users-page .admin-products-product-cell > div { min-width: 0; }
+.admin-users-page .admin-users-email { display: block; margin-top: 5px; color: var(--color-muted); font-size: 11px; line-height: 1.8; overflow-wrap: anywhere; }
+.admin-users-page .admin-users-contact { min-width: 0; line-height: 1.8; overflow-wrap: anywhere; }
+.admin-users-page .admin-users-contact > span { display: block; }
+.admin-users-page .admin-users-contact > p { margin-top: 5px; color: var(--color-muted); font-size: 11px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.admin-users-page .admin-products-row-actions .button { min-height: 40px; white-space: normal; }
+.admin-users-page .admin-products-product-cell strong { overflow-wrap: anywhere; }
+
+.admin-users-dialog { width: min(560px, calc(100% - 32px)); }
+.admin-users-dialog .admin-products-dialog-heading > div { min-width: 0; }
+.admin-users-dialog .admin-products-dialog-heading h2 { overflow-wrap: anywhere; }
+.admin-users-dialog .admin-users-confirm-account { display: grid; gap: 13px; margin: 18px 0; padding: 16px; border: 1px solid var(--color-border); border-radius: 6px; background: var(--color-page); }
+.admin-users-dialog .admin-users-confirm-account > div { display: grid; grid-template-columns: 112px minmax(0, 1fr); gap: 8px 13px; align-items: baseline; }
+.admin-users-dialog .admin-users-confirm-account dt { color: var(--color-muted); font-size: 12px; }
+.admin-users-dialog .admin-users-confirm-account dd { min-width: 0; margin: 0; color: var(--color-text); font-size: 13px; font-weight: 500; line-height: 1.8; overflow-wrap: anywhere; }
+.admin-users-dialog .admin-products-stop-copy { min-width: 0; }
+.admin-users-dialog .admin-products-dialog-actions .button { min-height: 44px; }
+
+@media (max-width: 1100px) {
+  .admin-users-page .admin-users-filters { grid-template-columns: minmax(0, 1fr) 180px; }
+  .admin-users-page .admin-users-filters .admin-products-filter-actions { grid-column: 1 / -1; justify-content: flex-end; }
+}
+@media (max-width: 940px) {
+  .admin-users-page .admin-orders-sidebar { flex-wrap: wrap; }
+  .admin-users-page .admin-orders-profile { flex: 1 1 100%; border-right: 0; border-bottom: 1px solid var(--color-border); }
+  .admin-users-page .admin-orders-sidebar nav { display: flex; flex: 1 1 100%; flex-wrap: wrap; gap: 4px; }
+  .admin-users-page .admin-orders-sidebar nav a { flex: 1 1 auto; min-width: 0; justify-content: center; white-space: normal; }
+}
+@media (max-width: 720px) {
+  .admin-users-page .admin-users-filters { grid-template-columns: minmax(0, 1fr); }
+  .admin-users-page .admin-users-filters .admin-products-filter-actions { grid-column: auto; }
+  .admin-users-page .admin-products-table { min-width: 0; }
+  .admin-users-page .admin-products-table td.admin-products-product-cell { display: block; }
+  .admin-users-page .admin-products-product-cell strong { font-size: 13px; }
+  .admin-users-page .admin-products-table td { grid-template-columns: 82px minmax(0, 1fr); }
+  .admin-users-page .admin-products-row-actions .button { min-height: 42px; }
+  .admin-users-page .admin-orders-sidebar nav a { flex: 1 1 44%; justify-content: flex-start; padding: 10px; }
+  .admin-users-page .admin-users-contact > p { font-size: 12px; }
+  .admin-users-dialog { width: calc(100% - 24px); }
+  .admin-users-dialog .admin-users-confirm-account { padding: 14px; }
+  .admin-users-dialog .admin-users-confirm-account > div { grid-template-columns: minmax(0, 1fr); gap: 3px; }
+}

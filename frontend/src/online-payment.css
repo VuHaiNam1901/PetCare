@@ -1,0 +1,96 @@
+.online-payment-page .online-payment-layout { display: grid; grid-template-columns: 300px minmax(0, 1fr); align-items: start; gap: 24px; }
+.online-payment-page .online-payment-summary,
+.online-payment-page .online-payment-card { min-width: 0; padding: 25px; border: 1px solid var(--color-border); border-radius: 8px; background: #fff; }
+.online-payment-page .online-payment-summary > h2 { margin-bottom: 20px; font-size: 17px; letter-spacing: -.3px; }
+.online-payment-page .online-payment-card > h2 { font-size: 20px; letter-spacing: -.4px; }
+.online-payment-page .online-payment-card > p { margin-top: 10px; color: var(--color-muted); font-size: 12px; line-height: 1.9; }
+.online-payment-page .online-payment-data { display: grid; gap: 17px; margin: 0; }
+.online-payment-page .online-payment-data > div { display: grid; gap: 5px; min-width: 0; }
+.online-payment-page .online-payment-data dt { color: var(--color-muted); font-size: 11px; }
+.online-payment-page .online-payment-data dd { min-width: 0; margin: 0; color: var(--color-text); font-size: 13px; line-height: 1.8; overflow-wrap: anywhere; }
+.online-payment-page .online-payment-amount { margin-top: 21px; padding-top: 19px; border-top: 1px solid var(--color-border); color: var(--color-primary-hover); font-size: 23px; font-weight: 700; overflow-wrap: anywhere; }
+.online-payment-page .online-payment-data .online-payment-amount { margin-top: 4px; }
+.online-payment-page .online-payment-amount dd { color: var(--color-primary-hover); font-size: 23px; font-weight: 700; }
+.online-payment-page .online-payment-simulation-note { display: flex; align-items: flex-start; gap: 10px; margin-block: 20px; padding: 15px; border: 1px solid #C8E0FA; border-radius: 6px; background: var(--color-section); color: var(--color-primary-hover); font-size: 12px; line-height: 1.9; overflow-wrap: anywhere; }
+.online-payment-page .online-payment-simulation-note > svg { flex-shrink: 0; margin-top: 3px; }
+.online-payment-page .online-payment-choices,
+.online-payment-page .online-payment-choices fieldset { min-width: 0; margin: 0; padding: 0; border: 0; }
+.online-payment-page .online-payment-choices legend { margin-bottom: 13px; padding: 0; font-size: 13px; font-weight: 600; }
+.online-payment-page .online-payment-choices .radiochoices { display: grid; gap: 12px; }
+.online-payment-page .online-payment-choice { display: flex; align-items: flex-start; gap: 12px; min-width: 0; min-height: 44px; padding: 17px; border: 1px solid var(--color-border); border-radius: 6px; background: #fff; cursor: pointer; }
+.online-payment-page .online-payment-choice + .online-payment-choice { margin-top: 12px; }
+.online-payment-page .radiochoices .online-payment-choice + .online-payment-choice { margin-top: 0; }
+.online-payment-page .online-payment-choice[data-selected='true'] { border-color: var(--color-primary); background: var(--color-page); }
+.online-payment-page .online-payment-choice:hover { border-color: var(--color-primary); }
+.online-payment-page .online-payment-choice:focus-within { outline: 3px solid var(--color-primary-hover); outline-offset: 3px; }
+.online-payment-page .online-payment-choice > input { flex-shrink: 0; width: 18px; height: 18px; margin: 3px 0 0; accent-color: var(--color-primary); }
+.online-payment-page .online-payment-choice > div { min-width: 0; }
+.online-payment-page .online-payment-choice strong { display: block; font-size: 13px; font-weight: 600; line-height: 1.8; overflow-wrap: anywhere; }
+.online-payment-page .online-payment-choice span { display: block; margin-top: 5px; color: var(--color-muted); font-size: 12px; line-height: 1.8; overflow-wrap: anywhere; }
+.online-payment-page .online-payment-choice:has(input:disabled) { opacity: .65; cursor: not-allowed; }
+.online-payment-page .online-payment-actions,
+.online-payment-dialog .online-payment-actions { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 10px; margin-top: 25px; }
+.online-payment-page .online-payment-actions .button,
+.online-payment-dialog .online-payment-actions .button { min-height: 44px; }
+.online-payment-page .online-payment-loading { display: grid; gap: 21px; min-width: 0; padding: 26px; border: 1px solid var(--color-border); border-radius: 8px; background: #fff; }
+.online-payment-page .online-payment-loading > p { color: var(--color-muted); font-size: 12px; }
+.online-payment-page .online-payment-loading .skeleton-line { width: 100%; height: 22px; }
+.online-payment-page .online-payment-loading .skeleton-line:last-child { width: 65%; }
+.online-payment-page .online-payment-error,
+.online-payment-dialog .online-payment-error { margin-block: 18px; padding: 14px 15px; border: 1px solid #EAC9C2; border-radius: 6px; background: #FFF4F0; color: #9E403C; font-size: 12px; line-height: 1.8; overflow-wrap: anywhere; }
+.online-payment-page .online-payment-error .button,
+.online-payment-dialog .online-payment-error .button { min-height: 42px; margin-top: 11px; }
+.online-payment-page .online-payment-result { margin-bottom: 21px; padding: 21px; border: 1px solid var(--color-border); border-radius: 8px; background: var(--color-page); }
+.online-payment-page .online-payment-result[data-outcome='success'] { border-color: #CEEAD7; background: #EAF8EF; color: #236647; }
+.online-payment-page .online-payment-result[data-outcome='failure'] { border-color: #EAC9C2; background: #FFF4F0; color: #9E403C; }
+.online-payment-page .online-payment-result h2 { margin-top: 10px; color: inherit; font-size: 18px; letter-spacing: -.3px; }
+.online-payment-page .online-payment-result p { margin-top: 9px; color: inherit; font-size: 12px; line-height: 1.9; overflow-wrap: anywhere; }
+.online-payment-page .online-payment-status { display: inline-flex; align-items: center; width: fit-content; max-width: 100%; padding: 5px 9px; border-radius: 4px; background: var(--color-section); color: var(--color-primary-hover); font-size: 11px; font-weight: 600; white-space: normal; overflow-wrap: anywhere; }
+.online-payment-page .online-payment-muted,
+.online-payment-dialog .online-payment-muted { color: var(--color-muted); font-size: 12px; line-height: 1.9; overflow-wrap: anywhere; }
+.online-payment-page .online-payment-summary > .online-payment-muted { margin-top: 14px; }
+.online-payment-page .online-payment-blocked { min-width: 0; padding: 30px 22px; border: 1px solid var(--color-border); border-radius: 8px; background: #fff; text-align: center; }
+.online-payment-page .online-payment-blocked > svg { color: var(--color-primary); }
+.online-payment-page .online-payment-blocked h2 { margin-top: 13px; font-size: 19px; }
+.online-payment-page .online-payment-blocked p { max-width: 550px; margin: 11px auto 0; color: var(--color-muted); font-size: 12px; line-height: 1.9; overflow-wrap: anywhere; }
+.online-payment-page .online-payment-blocked .button { min-height: 44px; margin-top: 20px; }
+.online-payment-page .online-payment-refresh-warning { margin-block: 18px; padding: 14px 15px; border: 1px solid #EBD9B4; border-radius: 6px; background: #FFF8EB; color: #80561E; font-size: 12px; line-height: 1.9; overflow-wrap: anywhere; }
+.online-payment-page .online-payment-refresh-warning .button { min-height: 42px; margin-top: 10px; }
+.online-payment-page .button:disabled,
+.online-payment-dialog .button:disabled,
+.online-payment-dialog .icon-button:disabled { opacity: .6; }
+
+.online-payment-dialog { width: min(560px, calc(100% - 32px)); }
+.online-payment-dialog .online-payment-dialog-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 15px; margin-bottom: 20px; }
+.online-payment-dialog .online-payment-dialog-heading h2 { min-width: 0; font-size: 20px; letter-spacing: -.4px; overflow-wrap: anywhere; }
+.online-payment-dialog .online-payment-dialog-heading .icon-button { flex-shrink: 0; min-width: 40px; min-height: 40px; margin: -7px -7px 0 0; }
+.online-payment-dialog .online-payment-confirm-data { display: grid; gap: 14px; margin: 18px 0; padding: 17px; border: 1px solid var(--color-border); border-radius: 6px; background: var(--color-page); }
+.online-payment-dialog .online-payment-confirm-data > div { display: grid; grid-template-columns: 125px minmax(0, 1fr); align-items: baseline; gap: 8px 13px; }
+.online-payment-dialog .online-payment-confirm-data dt { color: var(--color-muted); font-size: 12px; }
+.online-payment-dialog .online-payment-confirm-data dd { min-width: 0; margin: 0; color: var(--color-text); font-size: 13px; font-weight: 500; line-height: 1.8; overflow-wrap: anywhere; }
+.order-detail-page .online-payment-entry a.button { min-height: 42px; margin-top: 16px; }
+
+@media (max-width: 940px) {
+  .online-payment-page .online-payment-layout { grid-template-columns: 250px minmax(0, 1fr); gap: 20px; }
+  .online-payment-page .online-payment-summary,
+  .online-payment-page .online-payment-card { padding: 22px; }
+}
+@media (max-width: 760px) {
+  .online-payment-page .online-payment-layout { grid-template-columns: minmax(0, 1fr); gap: 18px; }
+  .online-payment-page .online-payment-summary,
+  .online-payment-page .online-payment-card,
+  .online-payment-page .online-payment-loading { padding: 21px 18px; }
+  .online-payment-page .online-payment-choice { width: 100%; padding: 15px; }
+  .online-payment-page .online-payment-actions .button,
+  .online-payment-dialog .online-payment-actions .button { flex: 1; }
+  .online-payment-page .online-payment-result { padding: 18px; }
+  .online-payment-dialog { width: calc(100% - 24px); max-height: calc(100dvh - 24px); padding: 21px 17px; }
+  .online-payment-dialog .online-payment-confirm-data { padding: 15px; }
+  .online-payment-dialog .online-payment-confirm-data > div { grid-template-columns: minmax(0, 1fr); gap: 4px; }
+}
+@media (max-width: 420px) {
+  .online-payment-page .online-payment-actions,
+  .online-payment-dialog .online-payment-actions { align-items: stretch; }
+  .online-payment-page .online-payment-actions .button,
+  .online-payment-dialog .online-payment-actions .button { flex: 1 1 100%; }
+}

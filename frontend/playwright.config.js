@@ -2,6 +2,8 @@ import { defineConfig } from '@playwright/test';
 
 export default defineConfig({
   testDir: './tests',
+  // Run this fetch-stub suite with node:test, not in a Playwright worker.
+  testIgnore: ['**/chat-service.test.js'],
   fullyParallel: false,
   workers: 1,
   timeout: 30000,
