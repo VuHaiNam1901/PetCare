@@ -9,6 +9,7 @@ import * as paymentsApi from '../services/payments.js';
 import * as vouchersApi from '../services/vouchers.js';
 import { AUTH_REDIRECT_KEY, activeAuthRedirect, authPageUrl, clearAuthRedirect, loginReturnUrl, purchaseLoginUrl, safeReturnUrl } from '../utils/auth-navigation.js';
 import { clearCheckoutDraft, prepareCheckoutDraft, readCheckoutDraft } from '../utils/checkout.js';
+import { activateChatIdentity, chatIdentity, clearChatOnLogout, completeChatLogin } from '../utils/chat-session.js';
 
 export const GUEST_KEY = 'petcare.guest-cart.v1';
 export const MERGE_KEY = 'petcare.guest-merge.v1';
@@ -127,6 +128,7 @@ export function CommerceProvider({ children }) {
   }
   async function expireSession(error) {
     if (!tokenRef.current || ![401, 403].includes(error.status)) return;
+    clearChatOnLogout();
     epoch.current++; tokenRef.current = null; userRef.current = null;
     sessionStorage.removeItem(TOKEN_KEY); setUser(null); displayCart(emptyCart());
     if (readJson(MERGE_KEY)) { source('guest-merge'); setMerge(true, 'Phiên đã hết hạn khi giỏ khách chưa được xác nhận hợp nhất. Đăng nhập lại để tiếp tục.', [], false); }
@@ -277,6 +279,7 @@ export function CommerceProvider({ children }) {
         if (token) {
           tokenRef.current = token;
           const result = await commerceApi('/api/auth/me', { token }); current(generation);
+          activateChatIdentity(chatIdentity(result.user));
           userRef.current = result.user; setUser(result.user);
           const path = window.location.pathname.replace(/\/+$/, '');
           if (path === '/wishlist' || path === '/my-orders' || path.startsWith('/my-orders/') || path === '/admin/orders' || path.startsWith('/admin/orders/') || path === '/admin/products' || path === '/admin/categories' || path === '/admin/users' || path === '/admin/vouchers' || path === '/profile') {
@@ -288,6 +291,7 @@ export function CommerceProvider({ children }) {
             });
           }
         } else {
+          activateChatIdentity('guest');
           const marker = readJson(MERGE_KEY);
           if (marker) { source('guest-merge'); setMerge(true, 'Giỏ khách đang chờ xác nhận hợp nhất. Đăng nhập lại để tiếp tục, dữ liệu vẫn được giữ nguyên.', [], false); }
           if (initial.current.error) throw new Error(initial.current.error);
@@ -303,6 +307,42 @@ export function CommerceProvider({ children }) {
       }
     })();
     return () => { alive = false; epoch.current++; };
+  }, []);
+
+  useEffect(() => {
+    let alive = true;
+    let controller;
+    const restoreAuth = async event => {
+      if (!event.persisted) return;
+      let storedToken;
+      try { storedToken = sessionStorage.getItem(TOKEN_KEY); } catch { return; }
+      if (storedToken === tokenRef.current) return;
+      controller?.abort();
+      controller = new AbortController();
+      const generation = ++epoch.current;
+      setAuthLoading(true); setCartLoading(true);
+      tokenRef.current = storedToken; userRef.current = null; setUser(null); displayCart(emptyCart());
+      try {
+        if (storedToken) {
+          const result = await sendCommerceApi('/api/auth/me', { token: storedToken, signal: controller.signal });
+          current(generation);
+          activateChatIdentity(chatIdentity(result.user));
+          userRef.current = result.user; setUser(result.user);
+          await synchronize(result.user, generation, { readOnly: true });
+        } else {
+          activateChatIdentity('guest');
+          const next = await preview(guestRef.current); current(generation); displayCart(next);
+        }
+      } catch (error) {
+        if (!alive || error.obsolete || error.name === 'AbortError') return;
+        await expireSession(error);
+        if (![401, 403].includes(error.status)) setCartError(error.message);
+      } finally {
+        if (alive && epoch.current === generation) { setAuthLoading(false); setCartLoading(false); }
+      }
+    };
+    window.addEventListener('pageshow', restoreAuth);
+    return () => { alive = false; controller?.abort(); window.removeEventListener('pageshow', restoreAuth); };
   }, []);
 
   async function editGuest(next) {
@@ -411,6 +451,11 @@ export function CommerceProvider({ children }) {
       }
       if (!flow) beginLogin();
       const result = await commerceApi('/api/auth/login', { method: 'POST', body: credentials });
+      // Chat transfer is capability-checked and independent of cart/order state.
+      // A temporary chat failure keeps a private pending handoff for this user.
+      const chatLoginGeneration = epoch.current;
+      await completeChatLogin(result.user, result.token);
+      current(chatLoginGeneration);
       sessionStorage.setItem(TOKEN_KEY, result.token); tokenRef.current = result.token; userRef.current = result.user; setUser(result.user);
       let synchronized = false;
       try { synchronized = await synchronize(result.user); }
@@ -654,6 +699,7 @@ export function CommerceProvider({ children }) {
   async function logout() {
     // Pause protected-page auth effects while leaving, so the page being
     // unloaded cannot overwrite /login with its previous account's returnTo.
+    clearChatOnLogout();
     checkoutRedirectRef.current = true;
     setAuthLoading(true);
     epoch.current++; tokenRef.current = null; userRef.current = null;

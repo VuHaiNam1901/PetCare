@@ -2,47 +2,12 @@ import { Fragment, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Send, X } from 'lucide-react';
 import { TOKEN_KEY, useCommerce } from '../context/CommerceContext.jsx';
-import { createChatRequestId, sendChatMessage } from '../services/chat.js';
+import { createChatRequestId, sendChatMessageWithRecovery } from '../services/chat.js';
 import { formatPrice, resolveImageUrl } from '../utils/catalog.js';
 import { ProductImage } from './ProductCard.jsx';
 import useChatbotDrag from '../hooks/useChatbotDrag.js';
-
-const CONVERSATION_KEY = 'petcare.chatbot-conversation.v1';
-const OPEN_KEY = 'petcare.chatbot-open.v1';
-const sessionId = value => value === null || (typeof value === 'string' && /^[A-Za-z0-9_-]{43}\.[A-Za-z0-9_-]{43}$/.test(value));
-function readConversation(identity) {
-  try {
-    const saved = JSON.parse(sessionStorage.getItem(CONVERSATION_KEY) || 'null');
-    if (saved?.version !== 1 || saved.identity !== identity || typeof saved.input !== 'string' || !sessionId(saved.session_id) || !Array.isArray(saved.turns)) return null;
-    const turns = saved.turns.map(turn => {
-      if (!turn?.request || typeof turn.request.message !== 'string' || !turn.request.message.trim() || [...turn.request.message].length > 2000 || typeof turn.request.request_id !== 'string' ||
-        !/^[a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}$/i.test(turn.request.request_id) ||
-        (turn.request.session_id !== undefined && (typeof turn.request.session_id !== 'string' || !sessionId(turn.request.session_id))) ||
-        !['done', 'failed', 'sending'].includes(turn.state)) throw new Error();
-      if ((turn.state === 'done' || turn.response) && (!turn.response || typeof turn.response.message !== 'string' ||
-        !Array.isArray(turn.response.products) || turn.response.products.some(product => !product || !Number.isSafeInteger(product.product_id) || typeof product.name !== 'string') ||
-        !Array.isArray(turn.response.warnings) || turn.response.warnings.some(warning => typeof warning !== 'string') ||
-        (turn.response.follow_up != null && typeof turn.response.follow_up !== 'string'))) throw new Error();
-      if (turn.state === 'failed' && (!turn.error || typeof turn.error.message !== 'string')) throw new Error();
-      // A full document navigation interrupts fetch. Keep the original request
-      // and UUID for the existing retry action instead of inventing a reply.
-      return turn.state === 'sending' ? { ...turn, request: { ...turn.request, ...(saved.session_id ? { session_id: saved.session_id } : {}) }, state: 'failed', retryAt: 0, error: {
-        message: 'Lượt trò chuyện trước chưa nhận được phản hồi khi chuyển trang. Vui lòng thử lại để tiếp tục.',
-        code: 'NAVIGATION_INTERRUPTED', status: 0, retryable: true,
-      } } : turn;
-    });
-    return { ...saved, turns };
-  } catch { return null; }
-}
-function saveConversation(value) {
-  try {
-    sessionStorage.setItem(CONVERSATION_KEY, JSON.stringify({ ...value, version: 1,
-      turns: value.turns.map(turn => ({ ...turn, error: turn.error ? { ...turn.error, message: turn.error.message } : null })) }));
-  } catch { /* Storage limits must not interrupt the current conversation. */ }
-}
-function readOpen() {
-  try { return sessionStorage.getItem(OPEN_KEY) === '1'; } catch { return false; }
-}
+import { CHAT_AUTH_EVENT, chatIdentity, restoreChatConversation, saveChatConversation } from '../utils/chat-session.js';
+import { chatbotDisplay } from '../utils/chatbot-display.js';
 
 function ChatbotAvatar({ size = 26 }) {
   return (
@@ -81,33 +46,35 @@ function ChatProducts({ products }) {
 
 // Closing keeps this session mounted. Both memory and saved conversation data
 // remain bound to the current identity; changing owners aborts old requests.
-function ChatSession({ open, closeChat, token, disabledReason, inputRef, panelRef, identity }) {
-  const [restored] = useState(() => readConversation(identity));
+function ChatSession({ open, closeChat, token, disabledReason, inputRef, panelRef, identity, initialConversation, revision = null, restoreError, onRestoreRetry }) {
+  const [restored] = useState(initialConversation);
   const [input, setInput] = useState(restored?.input || '');
   const [turns, setTurns] = useState(restored?.turns || []);
   const [sending, setSending] = useState(false);
   const [formError, setFormError] = useState('');
   const [now, setNow] = useState(Date.now);
+  const [cooldownUntil, setCooldownUntil] = useState(() => Number.isSafeInteger(restored?.cooldownUntil) ? restored.cooldownUntil : 0);
   const conversationRef = useRef(null);
   const errorRef = useRef(null);
   const sessionRef = useRef(restored?.session_id || null);
   const inFlight = useRef(false);
   const activeRequest = useRef(null);
   const alive = useRef(false);
+  const completedRequests = useRef(new Set((restored?.turns || []).filter(turn => turn.state === 'done').map(turn => turn.request.request_id)));
   const lastTurn = turns.at(-1);
   const failed = lastTurn?.state === 'failed' ? lastTurn : null;
-  const retryAt = failed?.retryAt || 0;
-  const retrySeconds = Math.max(0, Math.ceil((retryAt - now) / 1000));
-  const blocked = Boolean(disabledReason || sending || failed);
+  const retryAt = Math.max(cooldownUntil, restoreError?.retryAt || 0, ...turns.filter(turn => turn.state === 'failed').map(turn => turn.retryAt || 0));
+  const cooldownSeconds = Math.max(0, Math.ceil((cooldownUntil - now) / 1000));
+  const blocked = Boolean(disabledReason || sending || restoreError);
 
   const snapshot = useRef(null);
-  snapshot.current = { identity, input, turns, session_id: sessionRef.current };
-  useEffect(() => { saveConversation(snapshot.current); }, [input, turns, identity]);
+  snapshot.current = { identity, input, turns, cooldownUntil, session_id: sessionRef.current };
+  useEffect(() => { saveChatConversation(snapshot.current, revision); }, [input, turns, identity, cooldownUntil, revision]);
   useEffect(() => {
-    const persist = () => saveConversation({ ...snapshot.current, session_id: sessionRef.current });
+    const persist = () => saveChatConversation({ ...snapshot.current, session_id: sessionRef.current }, revision);
     window.addEventListener('pagehide', persist);
     return () => { window.removeEventListener('pagehide', persist); persist(); };
-  }, []);
+  }, [revision]);
 
   useEffect(() => {
     alive.current = true;
@@ -131,7 +98,7 @@ function ChatSession({ open, closeChat, token, disabledReason, inputRef, panelRe
   }, [turns, open, sending]);
 
   useEffect(() => {
-    if (!retryAt) return;
+    if (retryAt <= Date.now()) return;
     setNow(Date.now());
     const timer = setInterval(() => {
       const time = Date.now();
@@ -143,7 +110,8 @@ function ChatSession({ open, closeChat, token, disabledReason, inputRef, panelRe
 
   async function sendTurn(turn, retry = false) {
     // The ref closes the double-click/Enter race before React renders loading.
-    if (inFlight.current || disabledReason) return;
+    if (inFlight.current || disabledReason || Date.now() < cooldownUntil || completedRequests.current.has(turn.request.request_id) ||
+        (retry && Date.now() < (turn.retryAt || 0))) return;
     inFlight.current = true;
     const controller = new AbortController();
     activeRequest.current = controller;
@@ -153,9 +121,19 @@ function ChatSession({ open, closeChat, token, disabledReason, inputRef, panelRe
       ? previous.map(item => item.request.request_id === turn.request.request_id ? { ...turn, state: 'sending', error: null } : item)
       : [...previous, turn]);
     try {
-      const response = await sendChatMessage(turn.request, { token, signal: controller.signal });
+      const request = { ...turn.request, ...(!turn.request.session_id && sessionRef.current ? { session_id: sessionRef.current } : {}) };
+      const response = await sendChatMessageWithRecovery(request, { token, signal: controller.signal,
+        onSession(session) {
+          if (!alive.current || controller.signal.aborted) return;
+          sessionRef.current = session;
+          snapshot.current = { ...snapshot.current, session_id: session };
+          setTurns(previous => previous.map(item => item.request.request_id === request.request_id
+            ? { ...item, request: { ...item.request, session_id: session } } : item));
+        },
+      });
       if (!alive.current || controller.signal.aborted) return;
       sessionRef.current = response.session_id;
+      completedRequests.current.add(turn.request.request_id);
       setTurns(previous => previous.map(item => item.request.request_id === turn.request.request_id
         ? { ...item, state: 'done', response, error: null } : item));
     } catch (error) {
@@ -163,9 +141,13 @@ function ChatSession({ open, closeChat, token, disabledReason, inputRef, panelRe
       // Retryable errors can issue a session even when generation/save failed.
       // Never replace this turn's UUID or text when adopting that capability.
       if (error.session_id) sessionRef.current = error.session_id;
+      if (error.code === 'SESSION_FORBIDDEN') sessionRef.current = null;
       const request = { ...turn.request, ...(sessionRef.current ? { session_id: sessionRef.current } : {}) };
       const retryAt = Date.now() + (error.retryAfterMs || 0);
       setNow(Date.now());
+      if (error.kind === 'quota' || error.code === 'GEMINI_QUOTA' || error.code === 'RATE_LIMITED') {
+        setCooldownUntil(previous => Math.max(previous, retryAt));
+      }
       setTurns(previous => previous.map(item => item.request.request_id === request.request_id
         ? { ...item, request, state: 'failed', error, retryAt } : item));
     } finally {
@@ -179,7 +161,7 @@ function ChatSession({ open, closeChat, token, disabledReason, inputRef, panelRe
 
   function submit(event) {
     event.preventDefault();
-    if (blocked || inFlight.current) return;
+    if (blocked || inFlight.current || Date.now() < cooldownUntil) return;
     const message = input.trim();
     if (!message) return;
     if ([...message].length > 2000 || /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/.test(message)) {
@@ -198,6 +180,7 @@ function ChatSession({ open, closeChat, token, disabledReason, inputRef, panelRe
   function newConversation() {
     if (inFlight.current) return;
     sessionRef.current = null;
+    completedRequests.current.clear();
     setTurns([]);
     setInput('');
     setFormError('');
@@ -213,10 +196,13 @@ function ChatSession({ open, closeChat, token, disabledReason, inputRef, panelRe
         <button className="chatbot-close icon-button" type="button" aria-label="Đóng Trợ lý PetCareShop" onClick={closeChat}><X size={21} aria-hidden="true" /></button>
       </div>
       {turns.length > 0 && <div className="chatbot-toolbar"><button type="button" onClick={newConversation} disabled={sending}>Cuộc trò chuyện mới</button></div>}
+      {restoreError && <div className="chatbot-error" role="alert"><p>{restoreError.message}</p><button type="button" disabled={now < restoreError.retryAt} onClick={onRestoreRetry}>Thử lại</button></div>}
       <div className="chatbot-conversation" ref={conversationRef} role="log" aria-label="Hội thoại Trợ lý PetCareShop" aria-live="polite" aria-relevant="additions" aria-busy={sending}>
         {turns.length === 0 ? (
           <div className="chatbot-empty" aria-hidden="true"><ChatbotAvatar size={22} /></div>
-        ) : turns.map(turn => (
+        ) : turns.map(turn => {
+          const retrySeconds = Math.max(0, Math.ceil((Math.max(turn.retryAt || 0, cooldownUntil) - now) / 1000));
+          return (
           <Fragment key={turn.request.request_id}>
             <div className="chatbot-user"><p>{turn.request.message}</p><span className="chatbot-message-label">{turn.state === 'sending' ? 'Đang gửi' : turn.state === 'failed' ? 'Chưa nhận được phản hồi' : 'Bạn'}</span></div>
             {turn.response && <div className="chatbot-assistant">
@@ -228,22 +214,21 @@ function ChatSession({ open, closeChat, token, disabledReason, inputRef, panelRe
             </div>}
             {turn.state === 'failed' && <div className="chatbot-error" role="alert" tabIndex={-1} ref={errorRef}>
               <p>{turn.error.message}</p>
-              {turn.error.retryable && !turn.request.session_id && <p>Chưa nhận được phiên trò chuyện. Thử lại có thể bắt đầu một cuộc trò chuyện mới.</p>}
               {turn.error.retryable ? <>
                 {retrySeconds > 0 && <p>Có thể thử lại sau {retrySeconds} giây.</p>}
                 <button type="button" disabled={sending || retrySeconds > 0} onClick={() => { if (Date.now() >= turn.retryAt) void sendTurn(turn, true); }}>Thử lại</button>
               </> : <p>{[401, 403].includes(turn.error.status) && turn.error.code !== 'SESSION_FORBIDDEN'
                 ? <a href="/login?returnTo=%2F">Đăng nhập lại để tiếp tục</a>
-                : 'Hãy bắt đầu cuộc trò chuyện mới để tiếp tục.'}</p>}
+                : 'Nội dung hội thoại vẫn được giữ. Bạn có thể tiếp tục gửi tin nhắn khác.'}</p>}
             </div>}
           </Fragment>
-        ))}
+        ); })}
       </div>
-      <p className="chatbot-status" role="status">{disabledReason || (sending ? 'Trợ lý đang trả lời…' : failed ? (failed.error.retryable ? 'Bạn có thể thử lại hoặc bắt đầu cuộc trò chuyện mới.' : 'Chưa thể tiếp tục lượt trò chuyện này.') : lastTurn?.state === 'done' ? 'Đã nhận phản hồi từ trợ lý.' : '')}</p>
+      <p className="chatbot-status" role="status">{disabledReason || (sending ? 'Trợ lý đang trả lời…' : cooldownSeconds > 0 ? `Dịch vụ đang giới hạn lượt tư vấn. Có thể thử lại sau ${cooldownSeconds} giây.` : failed ? 'Hội thoại vẫn được giữ. Bạn có thể thử lại hoặc gửi tin nhắn khác.' : lastTurn?.state === 'done' ? 'Đã nhận phản hồi từ trợ lý.' : '')}</p>
       {formError && <p className="chatbot-form-error" role="alert">{formError}</p>}
       <form className="chatbot-composer" onSubmit={submit}>
         <input ref={inputRef} type="text" aria-label="Nội dung tin nhắn" placeholder="Nhập nội dung..." maxLength={2000} value={input} onChange={event => setInput(event.target.value)} autoComplete="off" disabled={blocked} />
-        <button type="submit" aria-label="Gửi tin nhắn" title="Gửi tin nhắn" disabled={blocked || !input.trim()}><Send size={19} aria-hidden="true" /></button>
+        <button type="submit" aria-label="Gửi tin nhắn" title="Gửi tin nhắn" disabled={blocked || cooldownSeconds > 0 || !input.trim()}><Send size={19} aria-hidden="true" /></button>
       </form>
     </section>, document.body
   );
@@ -251,8 +236,9 @@ function ChatSession({ open, closeChat, token, disabledReason, inputRef, panelRe
 
 export default function ChatbotWidget() {
   const { user, authLoading } = useCommerce();
-  const [open, setOpen] = useState(readOpen);
+  const [open, setOpen] = useState(chatbotDisplay.initialOpen);
   const [restoration, setRestoration] = useState(0);
+  const [loaded, setLoaded] = useState(null);
   const openerRef = useRef(null);
   const inputRef = useRef(null);
   let token = null;
@@ -262,14 +248,36 @@ export default function ChatbotWidget() {
     : !storageAvailable ? 'Vui lòng cho phép trình duyệt truy cập phiên đăng nhập để sử dụng chatbot.'
       : user && user.role !== 'user' ? 'Chatbot dành cho khách và tài khoản khách hàng.'
         : Boolean(user) !== Boolean(token) ? 'Chưa xác nhận được phiên đăng nhập. Vui lòng đăng nhập lại.' : '';
-  // Token rotation and guest/account transitions cannot reuse capabilities or
-  // render messages belonging to an earlier authenticated identity.
-  const identity = `${authLoading ? 'loading' : user ? `user:${user.user_id}:${user.role}:${user.status || ''}` : 'guest'}:${storageAvailable}:${token || ''}`;
-  const { widgetRef, panelRef, dragging, consumeDragClick, dragEvents } = useChatbotDrag(open, `${identity}:${restoration}`);
+  const identity = chatIdentity(user);
+  const sessionKey = `${identity}:${token || ''}:${restoration}`;
+  const ready = !disabledReason && loaded?.key === sessionKey && loaded.status === 'ready';
+  const recoveryError = loaded?.key === sessionKey && loaded.status === 'error' ? loaded.error : null;
+  const { widgetRef, panelRef, dragging, consumeDragClick, dragEvents } = useChatbotDrag(open, sessionKey);
+
+  useEffect(() => {
+    if (disabledReason) { setLoaded(null); return; }
+    const controller = new AbortController();
+    setLoaded({ key: sessionKey, status: 'loading' });
+    restoreChatConversation(identity, { token: user ? token : null, signal: controller.signal }).then(result => {
+      if (!controller.signal.aborted) {
+        setLoaded({ key: sessionKey, status: 'ready', ...result });
+      }
+    }).catch(error => {
+      if (!controller.signal.aborted) setLoaded({ key: sessionKey, status: 'error',
+        error: { message: error.message, retryAt: Date.now() + (error.retryAfterMs || 0) } });
+    });
+    return () => controller.abort();
+  }, [sessionKey, identity, token, disabledReason]);
+
+  useEffect(() => {
+    const reset = () => { setOpen(false); setLoaded(null); setRestoration(value => value + 1); };
+    window.addEventListener(CHAT_AUTH_EVENT, reset);
+    return () => window.removeEventListener(CHAT_AUTH_EVENT, reset);
+  }, []);
 
   const changeOpen = value => {
     setOpen(value);
-    try { sessionStorage.setItem(OPEN_KEY, value ? '1' : '0'); } catch { /* The panel remains usable without storage. */ }
+    chatbotDisplay.writeOpen(value);
   };
 
   const closeChat = () => {
@@ -280,7 +288,7 @@ export default function ChatbotWidget() {
   useEffect(() => {
     const restore = event => {
       if (!event.persisted) return;
-      setOpen(readOpen());
+      setOpen(chatbotDisplay.readOpen());
       setRestoration(value => value + 1);
     };
     window.addEventListener('pageshow', restore);
@@ -303,7 +311,10 @@ export default function ChatbotWidget() {
 
   return (
     <div ref={widgetRef} className={`chatbot-widget${dragging ? ' is-dragging' : ''}`}>
-      {!authLoading && <ChatSession key={`${identity}:${restoration}`} identity={identity} open={open} closeChat={closeChat} token={user ? token : null} disabledReason={disabledReason} inputRef={inputRef} panelRef={panelRef} />}
+      {!authLoading && <ChatSession key={`${sessionKey}:${ready ? 'ready' : 'pending'}`} identity={identity} open={open} closeChat={closeChat} token={user ? token : null}
+        disabledReason={disabledReason || (!ready && !recoveryError ? 'Đang khôi phục phiên trò chuyện…' : '')}
+        initialConversation={ready ? loaded.conversation : null} revision={ready ? loaded.revision : null}
+        restoreError={recoveryError} onRestoreRetry={() => setRestoration(value => value + 1)} inputRef={inputRef} panelRef={panelRef} />}
       <button ref={openerRef} className="chatbot-toggle" type="button" aria-label={open ? 'Thu gọn Trợ lý PetCareShop' : 'Mở Trợ lý PetCareShop'} title="Trợ lý PetCareShop — kéo để di chuyển" aria-expanded={open} aria-controls="petcare-chatbot" {...dragEvents} onClick={event => { if (!consumeDragClick(event)) open ? closeChat() : changeOpen(true); }}>
         <ChatbotAvatar size={42} /><span className="sr-only">Trợ lý PetCareShop</span>
       </button>

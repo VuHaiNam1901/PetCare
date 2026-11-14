@@ -141,7 +141,10 @@ test('orchestrator: unsupported actions, fabricated store policies, prices and m
         ['Giá sản phẩm là 100000đ.', 'GROUNDING_REJECTED'],
         ['Cho mèo uống paracetamol 5mg.', 'GROUNDING_REJECTED']
     ]) await t.test(advice, async () => {
-        const h = harness([[call('respond', answer({ advice }))]]);
+        // Grounding allows bounded model correction; capability violations
+        // still fail immediately. Supply each permitted reply with a fresh ID.
+        const attempts = code === 'GROUNDING_REJECTED' ? 4 : 1;
+        const h = harness(Array.from({ length: attempts }, (_, index) => [call('respond', answer({ advice }), `rejected-${index}`)]));
         await assert.rejects(() => h.reply('Bạn giúp mình nhé'), { code });
     });
 });

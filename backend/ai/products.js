@@ -2,6 +2,19 @@ const { measure } = require('./metrics');
 const PAGE_SIZE = 64;
 const DESCRIPTION_LIMIT = 1200;
 const ACTIVE_STATUS = 'Đang bán';
+const PET_SPECIES = Object.freeze(['cat', 'dog', 'bird', 'fish', 'hamster', 'rabbit']);
+const PET_TYPES_SQL = `COALESCE((SELECT JSON_ARRAYAGG(JSON_OBJECT(
+    'pet_type_id', pt.pet_type_id, 'slug', pt.slug, 'name', pt.name))
+    FROM product_pet_types ppt JOIN pet_types pt ON pt.pet_type_id = ppt.pet_type_id
+    WHERE ppt.product_id = p.product_id), JSON_ARRAY()) AS pet_types`;
+function classified(row) {
+    const petTypes = typeof row.pet_types === 'string' ? JSON.parse(row.pet_types) : row.pet_types;
+    if (!Array.isArray(petTypes)) throw new Error('Invalid catalog classification');
+    return { ...row, pet_types: petTypes };
+}
+function checkSignal(signal) {
+    if (signal?.aborted) throw Object.assign(new Error('Product query aborted'), { code: 'TOOL_ABORTED' });
+}
 function defaultDatabase() {
     require('dotenv').config({ path: require('node:path').join(__dirname, '..', '.env'), quiet: true });
     return require('../config/db');
@@ -52,7 +65,7 @@ function validateFilters(input = {}) {
         filters.categoryId = input.categoryId;
     }
     if (input.species !== undefined) {
-        if (!['cat', 'dog'].includes(input.species)) invalid('Invalid product species');
+        if (!PET_SPECIES.includes(input.species)) invalid('Invalid product species');
         filters.species = input.species;
     }
     if (input.productType !== undefined) {
@@ -134,17 +147,15 @@ function matchesType(row, type) {
 function matchesSignals(row, signals) {
     if (signals.types.length && !signals.types.some(type => matchesType(row, type))) return false;
     if ([...signals.excluded].some(type => matchesType(row, type))) return false;
-    // Prefer the literal title, then description, then category. This keeps a
-    // dog-specific title from inheriting cat evidence from a broad category.
-    const title = species(row.name), description = species(row.description), category = species(row.category_name);
-    const evidence = title.cat || title.dog ? title : description.cat || description.dog ? description : category;
-    if (signals.species.cat && !signals.species.dog && evidence.dog && !evidence.cat) return false;
-    if (signals.species.dog && !signals.species.cat && evidence.cat && !evidence.dog) return false;
+    // Species facts come from catalog relations, never guesses from prose.
+    if (signals.species.cat && !signals.species.dog && !row.pet_types.some(pet => pet.slug === 'cat')) return false;
+    if (signals.species.dog && !signals.species.cat && !row.pet_types.some(pet => pet.slug === 'dog')) return false;
     return true;
 }
 
 function relevance(row, terms, query) {
-    const name = normalizeText(row.name), category = normalizeText(row.category_name), description = normalizeText(row.description);
+    const name = normalizeText(row.name), category = normalizeText(row.category_name);
+    const description = normalizeText([row.description, ...row.pet_types.flatMap(pet => [pet.name, pet.slug])].join(' '));
     if (!terms.length) return 1;
     let score = 0;
     for (const term of terms) {
@@ -166,21 +177,27 @@ function createProductRepository({ db, categoryReader } = {}) {
         },
         // Exact references must not pass through relevance ranking or hide an
         // out-of-stock item. The bound placeholders contain IDs only.
-        async getByIds(productIds) {
+        async getByIds(productIds, { signal } = {}) {
+            checkSignal(signal);
             if (!Array.isArray(productIds) || productIds.length < 1 || productIds.length > 6 ||
                 new Set(productIds).size !== productIds.length || productIds.some(id => !Number.isInteger(id) || id < 1 || id > 2147483647)) invalid('Invalid product IDs');
             const connection = db || defaultDatabase();
-            const [rows] = await measure('mysql_products_ms', () => connection.execute(`SELECT p.product_id, p.category_id, c.name AS category_name,
+            const [rows] = await measure('mysql_products_ms', () => connection.execute(`SELECT /*+ MAX_EXECUTION_TIME(8000) */ p.product_id, p.category_id, c.name AS category_name,
                 p.name, p.price, p.stock_quantity, LEFT(p.description, ${DESCRIPTION_LIMIT}) AS description,
-                p.image_url, p.status, p.created_at FROM products p
+                p.image_url, p.status, p.created_at, ${PET_TYPES_SQL} FROM products p
                 JOIN categories c ON c.category_id = p.category_id
                 WHERE p.status = ? AND p.product_id IN (${productIds.map(() => '?').join(', ')}) LIMIT 6`, [ACTIVE_STATUS, ...productIds]));
-            const found = new Map(rows.filter(row => row.status === ACTIVE_STATUS && productIds.includes(row.product_id)).map(row => [row.product_id, row]));
+            checkSignal(signal);
+            const found = new Map(rows.filter(row => row.status === ACTIVE_STATUS && productIds.includes(row.product_id)).map(classified).map(row => [row.product_id, row]));
             return productIds.filter(id => found.has(id)).map(id => found.get(id));
         },
         // The stock option belongs to internal context construction, not filters.
-        async search(input = {}, { includeOutOfStock = false } = {}) {
+        async search(input = {}, { includeOutOfStock = false, signal } = {}) {
+            checkSignal(signal);
             const filters = validateFilters(input);
+            const signals = searchSignals(filters.query, filters.keywords);
+            if (filters.species) signals.species = { cat: filters.species === 'cat', dog: filters.species === 'dog' };
+            const speciesFilter = filters.species || (signals.species.cat && !signals.species.dog ? 'cat' : signals.species.dog && !signals.species.cat ? 'dog' : null);
             if (filters.productIds && !filters.productIds.length) return { products: [], totalMatches: 0, catalogLimited: false };
             const conditions = ['p.status = ?'];
             const params = [ACTIVE_STATUS];
@@ -189,11 +206,13 @@ function createProductRepository({ db, categoryReader } = {}) {
             if (filters.minPrice !== undefined) { conditions.push('p.price >= ?'); params.push(filters.minPrice); }
             if (filters.maxPrice !== undefined) { conditions.push('p.price <= ?'); params.push(filters.maxPrice); }
             if (filters.productIds) { conditions.push(`p.product_id IN (${filters.productIds.map(() => '?').join(', ')})`); params.push(...filters.productIds); }
-            const signals = searchSignals(filters.query, filters.keywords);
+            if (speciesFilter) {
+                conditions.push('EXISTS (SELECT 1 FROM product_pet_types ppt JOIN pet_types pt ON pt.pet_type_id = ppt.pet_type_id WHERE ppt.product_id = p.product_id AND pt.slug = ?)');
+                params.push(speciesFilter);
+            }
             // Explicit typed filters supplied by the conversational model and
             // validated memory take precedence over incidental query words.
             // The existing normalization/ranking remains retrieval-only.
-            if (filters.species) signals.species = { cat: filters.species === 'cat', dog: filters.species === 'dog' };
             if (filters.productType) signals.types = [TYPED_PRODUCT_TYPES[filters.productType]];
             const terms = signals.terms;
             const query = normalizeText(filters.query);
@@ -212,13 +231,17 @@ function createProductRepository({ db, categoryReader } = {}) {
             // Scan every active row by keyset, retaining only one SQL page and
             // the best six candidates. There is no first-100-row cutoff.
             while (true) {
-                const [rows] = await measure('mysql_products_ms', () => connection.execute(`SELECT p.product_id, p.category_id, c.name AS category_name,
+                checkSignal(signal);
+                const [rows] = await measure('mysql_products_ms', () => connection.execute(`SELECT /*+ MAX_EXECUTION_TIME(8000) */ p.product_id, p.category_id, c.name AS category_name,
                     p.name, p.price, p.stock_quantity, LEFT(p.description, ${DESCRIPTION_LIMIT}) AS description,
-                    p.image_url, p.status, p.created_at FROM products p
+                    p.image_url, p.status, p.created_at, ${PET_TYPES_SQL} FROM products p
                     JOIN categories c ON c.category_id = p.category_id
                     WHERE ${conditions.join(' AND ')} AND p.product_id > ? ORDER BY p.product_id ASC LIMIT ${PAGE_SIZE}`, [...params, cursor]));
-                for (const row of rows) {
+                checkSignal(signal);
+                for (const raw of rows) {
+                    const row = classified(raw);
                     if (row.product_id <= cursor || row.status !== ACTIVE_STATUS || (!includeOutOfStock && !(row.stock_quantity > 0))) continue;
+                    if (speciesFilter && !row.pet_types.some(pet => pet.slug === speciesFilter)) continue;
                     if (ids && !ids.has(row.product_id)) continue;
                     if (filters.categoryId !== undefined && row.category_id !== filters.categoryId) continue;
                     if (category && !normalizeText(row.category_name).includes(category)) continue;
@@ -241,4 +264,4 @@ function createProductRepository({ db, categoryReader } = {}) {
         }
     };
 }
-module.exports = { createProductRepository, normalizeText, validateFilters, searchTerms };
+module.exports = { createProductRepository, normalizeText, validateFilters, searchTerms, PET_SPECIES };

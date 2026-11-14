@@ -5,7 +5,7 @@ const assert = require('node:assert/strict');
 const { randomUUID } = require('node:crypto');
 const { createChatStore, requestHash, sessionStorageId } = require('../ai/sessions');
 const { createMemory, appendMessage, applyMemoryPatch, getActiveContext,
-    resolveDisplayedProduct, serializeMemory } = require('../ai/memory');
+    resolveDisplayedProduct, serializeMemory, recordSearch } = require('../ai/memory');
 
 // This protocol fixture exercises the real store without importing a real
 // database pool, credentials, SQL driver, route, or Gemini adapter.
@@ -54,7 +54,7 @@ class MemorySqlFixture {
                         (!sql.includes('LIKE') || row.message.includes(values[1].slice(1, -1))));
                     return [rows.slice(-1).map(row => ({ message: row.message }))];
                 }
-                if (sql.startsWith('SELECT sender')) return [scoped.slice(-8).reverse()
+                if (sql.startsWith('SELECT sender')) return [scoped.slice(sql.includes('LIMIT 40') ? -40 : -8).reverse()
                     .map(row => ({ sender: row.sender, message: row.message }))];
                 if (sql.startsWith('INSERT INTO chat_histories')) {
                     assert.ok(pending, 'history and memory require one transaction');
@@ -117,6 +117,7 @@ function remembered() {
         { op: 'switch_topic', topic: 'food', source },
         { op: 'set_fact', section: 'constraints', key: 'budget', fact: fact({ currency: 'VND', min: null, max: '200000.00' }) }
     ] });
+    memory = recordSearch(memory, { turn_id: 'u:first', filters: { species: 'cat', productType: 'kibble', maxPrice: '200000.00' } });
     return appendMessage(memory, { turn_id: 'a:first', role: 'assistant', text: response.message, product_ids: [28, 12] });
 }
 
@@ -156,6 +157,7 @@ test('session memory: a committed checkpoint survives a fresh store and preserve
         assert.equal(context.pet.name.value, 'Miu');
         assert.equal(context.pet.name.source.kind, 'user');
         assert.equal(context.constraints.budget.value.max, '200000.00');
+        assert.equal(context.recent_search.filters.species, 'cat');
         assert.equal(resolveDisplayedProduct(restored, { position: 2 }), 12);
         restored.state.pets[0].name.value = 'Only this copy';
         assert.equal(getActiveContext(await current.loadMemory()).pet.name.value, 'Miu');
@@ -199,6 +201,24 @@ test('session memory: replay lookup is read-only and cannot revert a later check
     assert.deepEqual(fixture.rows.map(row => row.message), before);
 });
 
+test('session memory: restored transcript is bounded, redacted and excludes internal memory', async () => {
+    const { fixture, store, token } = setup();
+    const saved = pair(remembered(), { message: 'Email me@example.com' });
+    await session(store, token, current => current.savePair(saved));
+    const fresh = createChatStore({ pool: fixture });
+    await session(fresh, token, async current => {
+        const turns = await current.recentTurns();
+        assert.equal(turns.length, 1);
+        assert.equal(turns[0].request_id, saved.requestId);
+        assert.ok(!turns[0].message.includes('me@example.com'));
+        assert.deepEqual(turns[0].response.products, response.products);
+        assert.equal(JSON.stringify(turns).includes('schema_version'), false);
+        assert.equal(JSON.stringify(turns).includes('request_hash'), false);
+        assert.deepEqual(await current.loadMemory(), saved.memory);
+    });
+    assert.equal(fixture.rows.length, 2);
+});
+
 for (const failure of ['failInsert', 'failCommit']) {
     test(`session memory: ${failure} rolls back both history and candidate memory`, async () => {
         const { fixture, store, token } = setup();
@@ -207,7 +227,8 @@ for (const failure of ['failInsert', 'failCommit']) {
         const candidate = appendMessage(first.memory, { turn_id: 'u:failed', role: 'user', text: 'Không được lưu lượt này.' });
         const failed = pair(candidate);
         fixture[failure] = true;
-        await assert.rejects(session(store, token, current => current.savePair(failed)), /private database/);
+        await assert.rejects(session(store, token, current => current.savePair(failed)), error =>
+            error.code === 'HISTORY_SAVE_FAILED' && error.chatSafe && !error.message.includes('private database'));
         fixture[failure] = false;
         assert.equal(fixture.rows.length, 2);
         assert.ok(fixture.events.includes('rollback'));
@@ -226,7 +247,7 @@ test('session memory: a rollback failure destroys the connection without publish
     const { fixture, store, token } = setup();
     fixture.failInsert = true;
     fixture.failRollback = true;
-    await assert.rejects(session(store, token, current => current.savePair(pair())), /private database insert/);
+    await assert.rejects(session(store, token, current => current.savePair(pair())), { code: 'HISTORY_SAVE_FAILED' });
     assert.deepEqual(fixture.events, ['lock', 'begin', 'insert', 'rollback', 'destroy']);
     assert.equal(fixture.rows.length, 0);
     assert.equal(fixture.locks.size, 0);
@@ -348,7 +369,7 @@ test('session memory: session and owner boundaries apply before any checkpoint i
     await session(store, token, current => current.savePair(pair()), 5);
     await session(store, `${token}-other`, async current => assert.equal(await current.loadMemory(), null));
     for (const wrongUser of [null, 6]) await assert.rejects(
-        session(store, token, current => current.loadMemory(), wrongUser),
+        session(store, token, current => current.recentTurns(), wrongUser),
         error => error.code === 'SESSION_FORBIDDEN' && error.status === 403);
     await session(store, token, async current => assert.equal(getActiveContext(await current.loadMemory()).pet.name.value, 'Miu'), 5);
     assert.equal(fixture.rows.length, 2);

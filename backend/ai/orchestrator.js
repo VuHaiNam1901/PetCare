@@ -7,9 +7,10 @@ const { MODEL } = require('../config/gemini');
 const { createGeminiAdapter, geminiError } = require('./gemini-adapter');
 const { createProductRepository, normalizeText } = require('./products');
 const { createProductTools } = require('./tools');
-const { validatePlan, redactPersonal } = require('./grounding');
+const { validatePlan, redactPersonal, rejectionCode } = require('./grounding');
 const { measure, measureSync } = require('./metrics');
 const memoryCore = require('./memory');
+const { getWebsiteGuides } = require('./website-knowledge');
 const { SYSTEM_PROMPT, FUNCTION_DECLARATIONS, INTENTS } = require('./orchestrator-prompt');
 const DEFAULT_LIMITS = Object.freeze({ modelCalls: 4, toolCalls: 6, timeoutMs: 45000,
     inputBytes: 48000, toolResultBytes: 16000, outputTokens: 2048, totalTokens: 48000 });
@@ -38,15 +39,15 @@ function redacted(value, key = '') {
 
 // This is an output/capability guard, not a language router. No executed tool
 // can contact a human, change a transaction, or supply store-policy evidence.
-function validateCapabilities(plan) {
+function validateCapabilities(plan, websiteGuides) {
     for (const text of [plan.advice, plan.follow_up, ...plan.warnings].filter(Boolean)) {
         const folded = normalizeText(text);
         check(!/\b(?:da|dang|se)\s+(?:ket noi|chuyen (?:tiep|yeu cau|ban)|bao (?:quan ly|nhan vien)|lien he (?:quan ly|nhan vien)|goi (?:quan ly|nhan vien)|gui (?:yeu cau|tin nhan)|tao (?:ticket|don))\b/.test(folded) &&
             !/\b(?:quan ly|nhan vien)\s+se\s+(?:goi|lien he|phan hoi)\b/.test(folded), 'UNSUPPORTED_ACTION');
-        if (/\b(?:chinh sach|doi tra|bao hanh|phi van chuyen|gio mo cua|hotline|dia chi cua hang)\b/.test(folded)) {
+        if (!(plan.intent === 'website_help' && websiteGuides.length) && /\b(?:chinh sach|doi tra|bao hanh|phi van chuyen|gio mo cua|hotline|dia chi cua hang)\b/.test(folded)) {
             check(/\b(?:chua co (?:thong tin|du lieu)|khong co (?:thong tin|du lieu)|(?:chua|khong) the xac nhan)\b/.test(folded) && !/\d/.test(folded), 'UNVERIFIED_STORE_FACT');
         }
-        if (/\b(?:ben hon|ben nhat|do ben cao|danh gia \d|\d sao)\b/.test(folded)) {
+        if (!(plan.intent === 'website_help' && websiteGuides.length) && /\b(?:ben hon|ben nhat|do ben cao|danh gia \d|\d sao)\b/.test(folded)) {
             check(/\b(?:chua co (?:thong tin|du lieu)|khong co (?:thong tin|du lieu)|(?:chua|khong) (?:the )?(?:xac nhan|ket luan))\b/.test(folded), 'UNVERIFIED_STORE_FACT');
         }
     }
@@ -85,25 +86,42 @@ function createOrchestrator({ generate = createGeminiAdapter(), repository = cre
 
         async function work() {
             const evidence = new Map();
+            const websiteGuides = new Map();
+            const comparedIds = new Set();
+            let catalogObserved = false;
             const seenCalls = new Set();
             const contents = [];
             let preparing = memoryCore.needsCompaction(memory);
+            let compaction;
+            if (preparing) {
+                try { compaction = memoryCore.compactionInput(memory); }
+                catch { throw failure('MEMORY_LIMIT'); }
+            }
             if (!preparing) {
                 try { memory = memoryCore.appendMessage(memory, { turn_id: turnId, role: 'user', text: message }); }
                 catch { throw failure('MEMORY_LIMIT'); }
             }
-            const initial = { user_request: message, current_turn_id: turnId, preparing,
-                summary: memory.summary, active_context: memoryCore.getActiveContext(memory),
-                recent_history: memory.recent_history, limits,
-                capabilities: { contact_human: false, execute_transactions: false, verified_store_policies: false },
-                historical_product_facts_are_current: false };
-            contents.push({ role: 'user', parts: [{ text: JSON.stringify(initial) }] });
+            function bootstrap() {
+                const context = memoryCore.promptContext(memory);
+                return { role: 'user', parts: [{ text: JSON.stringify({
+                    user_request: message, current_turn_id: turnId, preparing,
+                    ...(preparing ? { active_context: context.active_context, compaction,
+                        recent_history: context.recent_history.filter(item => item.sequence > compaction.through_sequence) } : context), limits,
+                    capabilities: { contact_human: false, execute_transactions: false, read_account_orders: false,
+                        website_usage_guides: true, verified_store_policies: false },
+                    historical_product_facts_are_current: false,
+                }) }] };
+            }
+            contents.push(bootstrap());
 
             for (let round = 0; round < limits.modelCalls; round++) {
                 if (controller.signal.aborted) throw failure('GEMINI_TIMEOUT', 504);
                 const lastRound = round === limits.modelCalls - 1;
-                const allowedNames = preparing ? ['compact_memory'] : lastRound ? ['respond'] : FUNCTION_DECLARATIONS.map(item => item.name);
-                const config = { systemInstruction: SYSTEM_PROMPT, tools: [{ functionDeclarations: FUNCTION_DECLARATIONS.filter(item => allowedNames.includes(item.name)) }],
+                const allowedNames = preparing ? ['compact_memory'] : lastRound ? ['respond'] : FUNCTION_DECLARATIONS.filter(item => item.name !== 'compact_memory').map(item => item.name);
+                const finalInstruction = lastRound && !preparing
+                    ? websiteGuides.size ? '\nĐây là lượt kết thúc. Với website_help, hướng dẫn tối đa bốn bước ngắn từ guides đã đọc, giữ điều kiện và giới hạn. Không suy đoán trạng thái tài khoản/đơn, không tạo nút hoặc đường dẫn. Với sản phẩm, chỉ chọn tối đa ba thẻ đã xác minh, không viết tên/giá/tồn hoặc placeholder trong lời văn.'
+                        : '\nĐây là lượt kết thúc: respond chỉ 1–2 câu ngắn, tối đa ba thẻ đã xác minh. Không liệt kê tên, biến thể, khối lượng, giá, ngân sách bằng số, số tồn hoặc mã placeholder. Không tham chiếu lựa chọn thứ tư trở đi. Chỉ kết luận hữu ích dựa trên công cụ và hỏi làm rõ nếu thiếu đối tượng; không bổ sung dữ kiện mới.' : '';
+                const config = { systemInstruction: SYSTEM_PROMPT + finalInstruction, tools: [{ functionDeclarations: FUNCTION_DECLARATIONS.filter(item => allowedNames.includes(item.name)) }],
                     toolConfig: { functionCallingConfig: { mode: 'ANY', allowedFunctionNames: allowedNames } },
                     maxOutputTokens: Math.min(limits.outputTokens, limits.totalTokens - usage.total_tokens - usage.reserved_tokens),
                     abortSignal: controller.signal, httpOptions: { timeout: Math.max(1, limits.timeoutMs - (Date.now() - started)), retryOptions: { attempts: 1 } } };
@@ -145,6 +163,7 @@ function createOrchestrator({ generate = createGeminiAdapter(), repository = cre
                 // reconstruct a tool turn from response.text/functionCalls alone.
                 contents.push(clone(candidate.content));
                 const replies = [];
+                let resetContext = false;
                 for (const call of calls) {
                     check(call.id === undefined || (typeof call.id === 'string' && call.id.length > 0 && call.id.length <= 120 && !seenCalls.has(call.id)));
                     if (call.id !== undefined) seenCalls.add(call.id);
@@ -155,23 +174,46 @@ function createOrchestrator({ generate = createGeminiAdapter(), repository = cre
                         shape(args, ['mode', 'intent', 'advice', 'product_ids', 'follow_up', 'warnings']);
                         check(['care', 'product'].includes(args.mode) && INTENTS.includes(args.intent));
                         check(Array.isArray(args.warnings) && args.warnings.length <= 2);
-                        validateCapabilities(args);
+                        check(args.mode !== 'product' || catalogObserved, 'GROUNDING_REJECTED');
+                        if (args.intent === 'compare' && Array.isArray(args.product_ids) && args.product_ids.length) {
+                            check(args.product_ids.every(id => comparedIds.has(id)), 'GROUNDING_REJECTED');
+                        }
+                        validateCapabilities(args, [...websiteGuides.values()]);
                         const active = memoryCore.getActiveContext(memory);
                         const confirmedBudget = active.constraints.budget?.source.kind === 'user' ? active.constraints.budget.value : null;
                         const search = {};
                         if (confirmedBudget?.min !== null && confirmedBudget?.min !== undefined) search.minPrice = confirmedBudget.min;
                         if (confirmedBudget?.max !== null && confirmedBudget?.max !== undefined) search.maxPrice = confirmedBudget.max;
                         let plan;
-                        try { plan = measureSync('grounding_ms', () => validatePlan({ text: JSON.stringify({ advice: args.advice, product_ids: args.product_ids, follow_up: args.follow_up, warnings: args.warnings }), candidates: [{ finishReason: 'STOP' }] },
-                            { mode: args.mode, intent: args.intent, products: [...evidence.values()], search })); }
-                        catch { throw failure('GROUNDING_REJECTED'); }
+                        try {
+                            // List ordinals are formatting, not stock/price claims.
+                            // Keep all numbers within sentences for the existing fact guard.
+                            const advice = typeof args.advice === 'string'
+                                ? args.advice.replace(/\\n/g, '\n').replace(/(^|\n)[ \t]*\d{1,2}[.)][ \t]+/g, '$1- ') : args.advice;
+                            plan = measureSync('grounding_ms', () => validatePlan({ text: JSON.stringify({ advice, product_ids: args.product_ids, follow_up: args.follow_up, warnings: args.warnings }), candidates: [{ finishReason: 'STOP' }] },
+                                { mode: args.mode, intent: args.intent, products: [...evidence.values()], search,
+                                    website_guides: [...websiteGuides.values()] }));
+                        }
+                        catch (error) {
+                            if (lastRound) throw failure('GROUNDING_REJECTED');
+                            replies.push({ functionResponse: { ...(call.id === undefined ? {} : { id: call.id }), name: call.name,
+                                response: { status: 'invalid_response', reason: rejectionCode(error),
+                                    verified_product_ids: [...evidence.keys()],
+                                    message: args.intent === 'website_help'
+                                        ? 'Chỉ diễn đạt lại guides đã đọc: tên nút/mục đúng labels, không bịa URL/số liệu/chính sách hoặc trạng thái đơn của khách. Không nói đã thực hiện thao tác. Không gợi ý thanh toán VNPAY. Dùng mode=care, product_ids=[]. Nếu chưa có guides, gọi get_website_guide trước; nếu thiếu thông tin, đọc feature_limits.'
+                                        : 'Viết lại ngắn gọn bằng tiếng Việt. Không nhắc tên/nhãn hiệu, kể cả tên không tìm thấy; không viết số tiền, ngay cả giới hạn ngân sách, hoặc số tồn và khẳng định còn/hết hàng. Không dùng placeholder [product:...]. Các dữ kiện nằm trong thẻ; chỉ gọi ngân sách là "ngân sách bạn đã nêu". Chỉ dùng ID đã xác minh; so sánh theo thứ tự thẻ và kết quả compare_products. Nếu không có kết quả, chỉ nói chưa tìm được sản phẩm phù hợp yêu cầu.' } } });
+                            continue;
+                        }
                         const products = plan.product_ids.map(id => {
                             const row = evidence.get(id);
                             return { product_id: row.product_id, category_id: row.category_id, category_name: row.category_name,
                                 name: row.name, price: row.price, stock_quantity: row.stock_quantity, image_url: row.image_url,
-                                status: row.status, available: row.status === 'Đang bán' && row.stock_quantity > 0, source: 'MySQL' };
+                                status: row.status, pet_types: row.pet_types,
+                                available: row.status === 'Đang bán' && row.stock_quantity > 0, source: 'MySQL' };
                         });
                         try { memory = memoryCore.appendMessage(memory, { turn_id: `${turnId}:assistant`, role: 'assistant', text: plan.advice,
+                            ...(plan.follow_up ? { follow_up: plan.follow_up } : {}),
+                            ...(plan.warnings.length ? { warnings: plan.warnings } : {}),
                             ...(products.length ? { product_ids: plan.product_ids } : {}) }); }
                         catch { throw failure('MEMORY_LIMIT'); }
                         return { mode: args.mode, intent: args.intent, message: plan.advice, products,
@@ -185,15 +227,31 @@ function createOrchestrator({ generate = createGeminiAdapter(), repository = cre
                     if (call.name === 'update_memory') {
                         check(!preparing);
                         shape(call.args, ['operations']);
-                        try { memory = memoryCore.applyMemoryPatch(memory, { base_revision: memory.revision, operations: call.args.operations }); }
-                        catch { throw failure('INVALID_MEMORY_UPDATE'); }
-                        result = { status: 'ok', active_context: memoryCore.getActiveContext(memory), revision: memory.revision };
+                        try {
+                            const operations = typeof call.args.operations === 'string' ? JSON.parse(call.args.operations) : call.args.operations;
+                            memory = memoryCore.applyMemoryPatch(memory, { base_revision: memory.revision, operations });
+                        }
+                        catch {
+                            result = { status: 'invalid_arguments', revision: memory.revision, current_turn_id: turnId,
+                                message: 'Memory chưa thay đổi. Chỉ lưu thông tin khách xác nhận, quote phải nguyên văn và turn_id đúng tin user. Bỏ qua cập nhật memory nếu chỉ cần lọc sản phẩm tức thời; tiếp tục dùng filters chính xác hoặc hỏi làm rõ.' };
+                        }
+                        result ||= { status: 'ok', active_context: memoryCore.getActiveContext(memory), revision: memory.revision };
+                    } else if (call.name === 'get_website_guide') {
+                        check(!preparing);
+                        try { result = getWebsiteGuides(call.args); }
+                        catch (error) {
+                            if (error?.code !== 'INVALID_TOOL') throw failure('WEBSITE_KNOWLEDGE_UNAVAILABLE');
+                            result = { status: 'invalid_arguments', message: 'Chọn 1–2 topics trong schema. Với chức năng chưa rõ chọn feature_limits; không tạo tên topic hoặc hướng dẫn mới.' };
+                        }
+                        check(Buffer.byteLength(JSON.stringify(result), 'utf8') <= limits.toolResultBytes, 'TOOL_RESULT_LIMIT');
+                        for (const guide of result.guides || []) websiteGuides.set(guide.id, guide);
                     } else if (call.name === 'compact_memory') {
                         try {
-                            const before = memory.recent_history.length;
+                            check(preparing && calls.length === 1 && call.args?.through_sequence === compaction.through_sequence, 'INVALID_MEMORY_UPDATE');
                             memory = memoryCore.compactMemory(memory, call.args);
-                            check(memory.recent_history.length < before, 'INVALID_MEMORY_UPDATE');
-                            if (preparing) { memory = memoryCore.appendMessage(memory, { turn_id: turnId, role: 'user', text: message }); preparing = false; }
+                            memory = memoryCore.appendMessage(memory, { turn_id: turnId, role: 'user', text: message });
+                            preparing = false;
+                            resetContext = true;
                         } catch { throw failure('INVALID_MEMORY_UPDATE'); }
                         result = { status: 'ok', summary: memory.summary, active_context: memoryCore.getActiveContext(memory), current_turn_id: turnId, preparing };
                     } else {
@@ -202,13 +260,29 @@ function createOrchestrator({ generate = createGeminiAdapter(), repository = cre
                         // cached earlier read must not resurrect an ID revoked
                         // by a later lookup; repeated calls spend the tool budget.
                         try { result = await tools.execute(call.name, call.args, { memory, signal: controller.signal }); }
-                        catch (error) { throw failure(error?.code === 'INVALID_TOOL' ? 'INVALID_TOOL' : 'CATALOG_UNAVAILABLE'); }
+                        catch (error) {
+                            if (error?.code !== 'INVALID_TOOL') throw failure('CATALOG_UNAVAILABLE');
+                            // Give Gemini one bounded opportunity per remaining
+                            // round to correct typed arguments, without exposing SQL/errors.
+                            replies.push({ functionResponse: { ...(call.id === undefined ? {} : { id: call.id }), name: call.name,
+                                response: { status: 'invalid_arguments', message: 'Tham số không hợp lệ. Dùng đúng schema, tiền VND dạng decimal và ID từ kết quả đã đọc; không nới điều kiện khách đã xác nhận.' } } });
+                            continue;
+                        }
                         check(result && ['ok', 'empty'].includes(result.status), 'INVALID_TOOL_RESULT');
+                        if (call.name === 'search_products') {
+                            try { memory = memoryCore.recordSearch(memory, { turn_id: turnId, filters: result.search }); }
+                            catch { throw failure('MEMORY_LIMIT'); }
+                        }
+                        catalogObserved = true;
+                        if (call.name === 'compare_products') {
+                            comparedIds.clear();
+                            for (const product of result.products || []) comparedIds.add(product.product_id);
+                        }
                         check(Buffer.byteLength(JSON.stringify(result), 'utf8') <= limits.toolResultBytes, 'TOOL_RESULT_LIMIT');
                         // A later exact lookup can revoke an earlier search
                         // result (deleted/stopped product or changed inventory).
                         if (['get_product_details', 'compare_products'].includes(call.name)) {
-                            for (const id of call.args.product_ids) evidence.delete(id);
+                            for (const id of result.requested_product_ids || call.args.product_ids || []) evidence.delete(id);
                         }
                         for (const id of result.missing_product_ids || []) evidence.delete(id);
                         for (const product of result.products || []) evidence.set(product.product_id, product);
@@ -216,7 +290,11 @@ function createOrchestrator({ generate = createGeminiAdapter(), repository = cre
                     if (controller.signal.aborted) throw failure('GEMINI_TIMEOUT', 504);
                     replies.push({ functionResponse: { ...(call.id === undefined ? {} : { id: call.id }), name: call.name, response: result } });
                 }
-                contents.push({ role: 'user', parts: replies });
+                if (resetContext) {
+                    // Drop the entire completed compaction exchange, including
+                    // its old history. Retaining it would defeat token savings.
+                    contents.splice(0, contents.length, bootstrap());
+                } else contents.push({ role: 'user', parts: replies });
             }
             throw failure('MODEL_CALL_LIMIT');
         }

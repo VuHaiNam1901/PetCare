@@ -7,7 +7,7 @@ const REJECTION_CODES = Object.freeze([
     'Invalid text', 'Sensitive output', 'Invalid warnings', 'Generated commercial facts',
     'Generated product name', 'Generated inventory', 'Unverified proper name in prose',
     'Product name belongs in a card', 'Diagnosis or medication instruction',
-    'Unverified suitability or medical advice'
+    'Unverified suitability or medical advice', 'Unverified website instruction'
 ]);
 const rejectionCodes = new Set(REJECTION_CODES);
 const rejectionCode = error => rejectionCodes.has(error?.message) ? error.message : 'Invalid model response';
@@ -175,6 +175,11 @@ function assertNoConcreteMedication(text) {
 function validateProse(text, context) {
     const folded = normalizeText(text);
     assertNoConcreteMedication(text);
+    if (context.intent === 'website_help') {
+        const prose = require('./website-knowledge').validateWebsiteProse(text, context.website_guides);
+        assertNoInventedName(prose, context);
+        return;
+    }
     if (/[₫$€]/.test(text) || [...fold(text).matchAll(MONEY)].length || /\b(?:gia|ton kho|so luong|con lai)\b.{0,35}\d/.test(folded)) reject('Generated commercial facts');
     for (const match of fold(text).matchAll(/\b(?:khuyen mai|giam gia|mien phi|con hang|het hang|san co)\b/g)) {
         if (!negatedClaim(fold(text).slice(0, match.index))) reject('Generated commercial facts');
@@ -212,6 +217,7 @@ function validatePlan(response, context) {
     try { plan = JSON.parse(response.text); } catch { reject('Invalid model response'); }
     const keys = ['advice', 'product_ids', 'follow_up', 'warnings'];
     if (!plan || typeof plan !== 'object' || Array.isArray(plan) || Object.keys(plan).length !== 4 || Object.keys(plan).some(key => !keys.includes(key))) reject('Unexpected model fields');
+    if (context.intent === 'website_help' && (context.mode !== 'care' || !context.website_guides?.length)) reject('Unverified website instruction');
     const selected = selectedProducts(plan, context);
     const prepare = (value, max, nullable = false) => {
         const safe = safeText(value, max, nullable);

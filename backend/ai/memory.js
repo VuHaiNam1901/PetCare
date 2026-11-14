@@ -1,5 +1,8 @@
 'use strict';
 
+const { validateFilters } = require('./products');
+const { redactPersonal } = require('./grounding');
+
 // Pure, server-owned conversation state. No language classification, SDK, I/O,
 // clock, or process cache. Callers persist the returned snapshot with the reply.
 // A provenance quote is evidence of origin, not proof that an extraction is
@@ -14,6 +17,7 @@ const LIMITS = Object.freeze({ history: 12, message: 2000, summary: 1500,
 const SECTIONS = ['needs', 'constraints', 'preferences'];
 const PET_FIELDS = ['name', 'species', 'age'];
 const UNSAFE_KEYS = new Set(['__proto__', 'prototype', 'constructor']);
+const PRIVATE_FACT = /^(?:email|phone|telephone|address|shipping_address|password|api_key|access_token|refresh_token|credit_card|bank_account)$/;
 const fail = (code = 'MEMORY_INVALID') => { throw Object.assign(new Error(code), { code }); };
 const assert = (condition, code) => { if (!condition) fail(code); };
 const own = (value, key) => Object.hasOwn(value, key);
@@ -148,7 +152,7 @@ function validateMemory(memory) {
     assert(Array.isArray(memory.recent_history) && memory.recent_history.length <= LIMITS.history);
     const seenTurns = new Set();
     memory.recent_history.forEach((message, index) => {
-        shape(message, ['turn_id', 'sequence', 'role', 'text'], ['product_ids']);
+        shape(message, ['turn_id', 'sequence', 'role', 'text'], ['product_ids', 'follow_up', 'warnings']);
         identifier(message.turn_id);
         assert(!seenTurns.has(message.turn_id));
         seenTurns.add(message.turn_id);
@@ -156,10 +160,15 @@ function validateMemory(memory) {
         assert(['user', 'assistant'].includes(message.role));
         text(message.text, LIMITS.message);
         if (own(message, 'product_ids')) { assert(message.role === 'assistant'); ids(message.product_ids); }
+        if (own(message, 'follow_up')) { assert(message.role === 'assistant'); text(message.follow_up, 250); }
+        if (own(message, 'warnings')) {
+            assert(message.role === 'assistant' && Array.isArray(message.warnings) && message.warnings.length <= 2);
+            message.warnings.forEach(warning => text(warning, 300));
+        }
     });
     assert(memory.summary.through_sequence + memory.recent_history.length === memory.last_sequence);
     const state = memory.state;
-    shape(state, ['pets', 'active_pet_id', 'current_topic', ...SECTIONS, 'displayed_product_sets', 'focused_products']);
+    shape(state, ['pets', 'active_pet_id', 'current_topic', ...SECTIONS, 'displayed_product_sets', 'focused_products'], ['search_contexts']);
     assert(Array.isArray(state.pets) && state.pets.length <= LIMITS.pets);
     const petIds = new Set();
     for (const pet of state.pets) {
@@ -189,6 +198,21 @@ function validateMemory(memory) {
         factCount += state[section].length;
     }
     assert(factCount <= LIMITS.facts);
+    if (state.search_contexts !== undefined) {
+        assert(Array.isArray(state.search_contexts) && state.search_contexts.length <= LIMITS.productSets);
+        const scopes = new Set();
+        for (const search of state.search_contexts) {
+            shape(search, ['turn_id', 'sequence', 'pet_id', 'topic', 'filters', 'source']);
+            assert(search.source === 'product_tool');
+            identifier(search.turn_id); integer(search.sequence, 1, memory.last_sequence);
+            scope({ pet_id: search.pet_id, topic: search.topic }, state);
+            const key = JSON.stringify([search.pet_id, search.topic]);
+            assert(!scopes.has(key)); scopes.add(key);
+            const origin = memory.recent_history.find(message => message.sequence === search.sequence);
+            assert(search.sequence <= memory.summary.through_sequence || (origin?.role === 'user' && origin.turn_id === search.turn_id));
+            try { validateFilters(search.filters); } catch { fail(); }
+        }
+    }
     assert(Array.isArray(state.displayed_product_sets) && state.displayed_product_sets.length <= LIMITS.productSets);
     let previousSequence = 0;
     const displayedTurns = new Set();
@@ -234,14 +258,22 @@ function finish(next) {
 // summary before appending beyond the window/byte budget.
 function appendMessage(memory, input) {
     jsonData(input);
-    shape(input, ['turn_id', 'role', 'text'], ['product_ids']);
+    shape(input, ['turn_id', 'role', 'text'], ['product_ids', 'follow_up', 'warnings']);
     const next = candidate(memory);
     assert(next.recent_history.length < LIMITS.history, 'MEMORY_COMPACTION_REQUIRED');
     identifier(input.turn_id);
+    text(input.text, LIMITS.message);
+    if (own(input, 'follow_up')) text(input.follow_up, 250);
+    if (own(input, 'warnings')) {
+        assert(Array.isArray(input.warnings) && input.warnings.length <= 2);
+        input.warnings.forEach(warning => text(warning, 300));
+    }
     assert(!next.recent_history.some(message => message.turn_id === input.turn_id) &&
         !next.state.displayed_product_sets.some(set => set.turn_id === input.turn_id));
     next.last_sequence++;
-    const message = { ...clone(input), sequence: next.last_sequence };
+    const message = { ...clone(input), text: redactPersonal(input.text), sequence: next.last_sequence };
+    if (own(input, 'follow_up')) message.follow_up = redactPersonal(input.follow_up);
+    if (own(input, 'warnings')) message.warnings = input.warnings.map(redactPersonal);
     next.recent_history.push(message);
     if (input.role === 'assistant' && input.product_ids?.length) {
         next.state.displayed_product_sets.push({ turn_id: input.turn_id, sequence: next.last_sequence,
@@ -310,6 +342,7 @@ function applyMemoryPatch(memory, patch) {
             provenance(operation.source, next, true);
             if (PET_FIELDS.some(field => pet[field]?.source.kind === 'user')) assert(operation.source.kind === 'user', 'MEMORY_PROVENANCE');
             state.pets = state.pets.filter(item => item.pet_id !== operation.pet_id);
+            if (state.search_contexts) state.search_contexts = state.search_contexts.filter(item => item.pet_id !== operation.pet_id);
             for (const section of SECTIONS) state[section] = state[section].filter(entry => entry.pet_id !== operation.pet_id);
             state.displayed_product_sets = state.displayed_product_sets.filter(set => set.pet_id !== operation.pet_id);
             if (state.active_pet_id === operation.pet_id) { state.active_pet_id = null; state.focused_products = null; }
@@ -330,6 +363,7 @@ function applyMemoryPatch(memory, patch) {
                 ['scope', ...(operation.op === 'confirm_fact' ? ['value'] : [])]);
             assert(SECTIONS.includes(operation.section));
             topic(operation.key);
+            assert(operation.op === 'remove_fact' || !PRIVATE_FACT.test(operation.key), 'MEMORY_SENSITIVE');
             const target = own(operation, 'scope') ? operation.scope : currentScope(state);
             scope(target, state);
             const entries = state[operation.section];
@@ -374,7 +408,7 @@ function compactMemory(memory, input) {
     text(input.text, LIMITS.summary);
     assert(next.recent_history.some(message => message.sequence === input.through_sequence));
     next.recent_history = next.recent_history.filter(message => message.sequence > input.through_sequence);
-    next.summary = { text: input.text, through_sequence: input.through_sequence, kind: 'inference' };
+    next.summary = { text: redactPersonal(input.text), through_sequence: input.through_sequence, kind: 'inference' };
     // The caller supplies a cumulative summary (previous summary + this prefix).
     // Core checks boundaries, not meaning, and never turns summary into facts.
     return finish(next);
@@ -385,11 +419,13 @@ function getActiveContext(memory) {
     const target = currentScope(state);
     const context = { pet: state.pets.find(pet => pet.pet_id === target.pet_id) ?? null,
         current_topic: state.current_topic, needs: {}, constraints: {}, preferences: {},
+        recent_search: [...(state.search_contexts || [])].reverse().find(search => search.pet_id === target.pet_id && search.topic === target.topic) ?? null,
         displayed_product_set: [...state.displayed_product_sets].reverse().find(set => set.pet_id === target.pet_id && set.topic === target.topic) ?? null,
         focused_products: state.focused_products?.fact ?? null };
     for (const section of SECTIONS) {
         const selected = new Map();
         for (const entry of state[section]) {
+            if (PRIVATE_FACT.test(entry.key)) continue;
             if ((entry.pet_id !== null && entry.pet_id !== target.pet_id) || (entry.topic !== null && entry.topic !== target.topic)) continue;
             const score = (entry.pet_id !== null ? 2 : 0) + (entry.topic !== null ? 1 : 0);
             const previous = selected.get(entry.key);
@@ -439,9 +475,11 @@ function deserializeMemory(input) {
         assert(history.length <= LIMITS.history, 'MEMORY_COMPACTION_REQUIRED');
         let memory = createMemory();
         history.forEach((message, index) => {
-            shape(message, ['role', 'text'], ['product_ids', 'search']);
+            shape(message, ['role', 'text'], ['product_ids', 'search', 'follow_up', 'warnings']);
             memory = appendMessage(memory, { turn_id: `legacy:${index + 1}`, role: message.role, text: message.text,
-                ...(own(message, 'product_ids') ? { product_ids: message.product_ids } : {}) });
+                ...(own(message, 'product_ids') ? { product_ids: message.product_ids } : {}),
+                ...(own(message, 'follow_up') ? { follow_up: message.follow_up } : {}),
+                ...(own(message, 'warnings') ? { warnings: message.warnings } : {}) });
         });
         return memory;
     }
@@ -453,6 +491,49 @@ function needsCompaction(memory) {
     return memory.recent_history.length >= LIMITS.history - 2 || storedJson(memory).length >= LIMITS.bytes * 0.75;
 }
 
+// Retrieval metadata describes a previous tool query, not user-confirmed facts
+// or current product data. No names, prices or inventory are cached here.
+function recordSearch(memory, { turn_id, filters }) {
+    const next = candidate(memory);
+    const origin = next.recent_history.find(message => message.turn_id === turn_id && message.role === 'user');
+    assert(Boolean(origin));
+    const safeFilters = validateFilters(filters);
+    if (safeFilters.query) safeFilters.query = redactPersonal(safeFilters.query);
+    safeFilters.keywords = safeFilters.keywords.map(redactPersonal);
+    const target = currentScope(next.state);
+    next.state.search_contexts = (next.state.search_contexts || []).filter(search => search.pet_id !== target.pet_id || search.topic !== target.topic);
+    next.state.search_contexts.push({ ...target, turn_id, sequence: origin.sequence, filters: safeFilters, source: 'product_tool' });
+    next.state.search_contexts = next.state.search_contexts.slice(-LIMITS.productSets);
+    return finish(next);
+}
+
+function promptContext(memory) {
+    const state = candidate(memory);
+    const recent = [];
+    let characters = 0;
+    for (const message of [...state.recent_history].reverse()) {
+        const size = message.text.length + (message.follow_up?.length || 0) + (message.warnings || []).reduce((count, warning) => count + warning.length, 0);
+        if (recent.length >= 6 || characters + size > 6000) break;
+        recent.unshift({ ...message, text: redactPersonal(message.text),
+            ...(message.follow_up ? { follow_up: redactPersonal(message.follow_up) } : {}),
+            ...(message.warnings ? { warnings: message.warnings.map(redactPersonal) } : {}) });
+        characters += size;
+    }
+    return { summary: { ...state.summary, text: redactPersonal(state.summary.text) },
+        active_context: getActiveContext(state), recent_history: recent };
+}
+
+function compactionInput(memory) {
+    validateMemory(memory);
+    // Keep two complete recent turns when possible; still permit compaction
+    // when the escaped byte budget is reached earlier than the turn limit.
+    const completed = memory.recent_history.filter(message => message.role === 'assistant');
+    const end = [...completed].reverse().find(message => message.sequence <= memory.last_sequence - 4) || completed[0];
+    assert(Boolean(end), 'MEMORY_LIMIT');
+    return { through_sequence: end.sequence, previous_summary: memory.summary,
+        history: memory.recent_history.filter(message => message.sequence <= end.sequence) };
+}
+
 module.exports = { MEMORY_VERSION, LIMITS, createMemory, validateMemory, appendMessage,
     applyMemoryPatch, compactMemory, serializeMemory, deserializeMemory,
-    getActiveContext, resolveDisplayedProduct, needsCompaction };
+    getActiveContext, resolveDisplayedProduct, needsCompaction, recordSearch, promptContext, compactionInput };

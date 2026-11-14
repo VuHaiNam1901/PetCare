@@ -118,7 +118,7 @@ export default function App() {
       </main>
       <Footer />
       {isHomePage && <FloatingContact />}
-      {!/^\/admin(?:\/|$)/.test(pathname) && <ChatbotWidget />}
+      {!authMode && !/^\/admin(?:\/|$)/.test(pathname) && <ChatbotWidget />}
       <FeatureNotice message={commerce.notice} type={commerce.noticeType} onClose={commerce.clearNotice} />
     </div>
   );

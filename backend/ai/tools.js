@@ -1,12 +1,12 @@
 'use strict';
 
-const { createProductRepository, validateFilters } = require('./products');
-const { getActiveContext } = require('./memory');
+const { createProductRepository, validateFilters, PET_SPECIES } = require('./products');
+const { getActiveContext, resolveDisplayedProduct } = require('./memory');
 const { redactPersonal } = require('./grounding');
 const ACTIVE = 'Đang bán';
 const NAMES = ['list_categories', 'search_products', 'get_product_details', 'compare_products'];
-const CRITERIA = ['price', 'stock', 'category', 'durability', 'ingredients', 'age_suitability', 'promotion', 'reviews', 'brand', 'material'];
-const VERIFIED = ['price', 'stock', 'category'];
+const CRITERIA = ['price', 'stock', 'category', 'species', 'durability', 'ingredients', 'age_suitability', 'promotion', 'reviews', 'brand', 'material'];
+const VERIFIED = ['price', 'stock', 'category', 'species'];
 const FILTER_KEYS = ['query', 'keywords', 'categoryId', 'category', 'minPrice', 'maxPrice', 'limit', 'sort', 'species', 'productType'];
 const PRODUCT_TYPES = ['food', 'kibble', 'wet_food', 'snack', 'toys', 'fish_oil'];
 const error = code => Object.assign(new Error(code), { code });
@@ -71,11 +71,17 @@ function product(row) {
     if (!row || !id(row.product_id) || !id(row.category_id) || !Number.isInteger(row.stock_quantity) || row.stock_quantity < 0 || row.stock_quantity > 2147483647 || row.status !== ACTIVE) unavailable();
     let price;
     try { price = validateFilters({ minPrice: row.price }).minPrice; } catch { unavailable(); }
+    if (!Array.isArray(row.pet_types) || row.pet_types.length > PET_SPECIES.length ||
+        new Set(row.pet_types.map(pet => pet?.slug)).size !== row.pet_types.length) unavailable();
+    const petTypes = row.pet_types.map(pet => {
+        if (!pet || !id(pet.pet_type_id) || !PET_SPECIES.includes(pet.slug)) unavailable();
+        return { pet_type_id: pet.pet_type_id, slug: pet.slug, name: safeText(pet.name, 50) };
+    }).sort((a, b) => a.pet_type_id - b.pet_type_id);
     return { product_id: row.product_id, category_id: row.category_id,
         category_name: safeText(row.category_name, 100), name: safeText(row.name, 150),
         price, stock_quantity: row.stock_quantity, status: ACTIVE,
         available: row.stock_quantity > 0, image_url: image(row.image_url),
-        description: safeText(row.description, 800, true), source: 'MySQL' };
+        pet_types: petTypes, description: safeText(row.description, 800, true), source: 'MySQL' };
 }
 
 function searchFilters(input, memory) {
@@ -129,7 +135,7 @@ function createProductTools({ repository = createProductRepository(), now = () =
         return observed;
     }
     async function details(requested, signal) {
-        const rows = await read(() => repository.getByIds(requested), signal);
+        const rows = await read(() => repository.getByIds(requested, { signal }), signal);
         if (!Array.isArray(rows) || rows.length > 6) unavailable();
         const byId = new Map();
         for (const row of rows) {
@@ -157,10 +163,16 @@ function createProductTools({ repository = createProductRepository(), now = () =
             return { status: categories.length ? 'ok' : 'empty', observed_at: stamp(), categories, limited: rows.length > 20 };
         }
         if (name === 'search_products') {
-            object(args, ['filters'], ['include_out_of_stock']);
+            object(args, ['filters'], ['include_out_of_stock', 'use_recent_search']);
             if (Object.hasOwn(args, 'include_out_of_stock') && typeof args.include_out_of_stock !== 'boolean') invalid();
-            const filters = searchFilters(args.filters, memory);
-            const result = await read(() => repository.search(filters, { includeOutOfStock: args.include_out_of_stock === true }), signal);
+            if (Object.hasOwn(args, 'use_recent_search') && typeof args.use_recent_search !== 'boolean') invalid();
+            object(args.filters, [], FILTER_KEYS);
+            const recent = args.use_recent_search && memory ? getActiveContext(memory).recent_search : null;
+            if (args.use_recent_search && !recent) invalid();
+            // Reuse only on an explicit model continuation, within the active
+            // topic/pet. A new search never silently inherits an old query.
+            const filters = searchFilters({ ...(recent?.filters || {}), ...args.filters }, memory);
+            const result = await read(() => repository.search(filters, { includeOutOfStock: args.include_out_of_stock === true, signal }), signal);
             if (!result || !Array.isArray(result.products) || !Number.isInteger(result.totalMatches) || result.totalMatches < 0) unavailable();
             const products = result.products.slice(0, filters.limit).map(product);
             if (new Set(products.map(row => row.product_id)).size !== products.length) unavailable();
@@ -171,17 +183,25 @@ function createProductTools({ repository = createProductRepository(), now = () =
                 search: filters, total_matches: result.totalMatches,
                 limited: Boolean(result.catalogLimited) || result.totalMatches > products.length };
         }
-        object(args, ['product_ids', ...(name === 'compare_products' ? ['criteria'] : [])]);
-        productIds(args.product_ids, name === 'compare_products' ? 2 : 1);
+        object(args, name === 'compare_products' ? ['criteria'] : [], ['product_ids', 'positions']);
+        if (Object.hasOwn(args, 'product_ids') === Object.hasOwn(args, 'positions')) invalid();
+        let requested = args.product_ids;
+        if (Object.hasOwn(args, 'positions')) {
+            if (!memory || !Array.isArray(args.positions) || !args.positions.length || args.positions.length > 6 ||
+                new Set(args.positions).size !== args.positions.length || args.positions.some(position => !Number.isInteger(position) || position < 1 || position > 6)) invalid();
+            requested = args.positions.map(position => resolveDisplayedProduct(memory, { position }));
+        }
+        productIds(requested, name === 'compare_products' ? 2 : 1);
         if (name === 'compare_products' && (!Array.isArray(args.criteria) || !args.criteria.length || args.criteria.length > CRITERIA.length ||
             new Set(args.criteria).size !== args.criteria.length || args.criteria.some(value => !CRITERIA.includes(value)))) invalid();
-        const result = await details(args.product_ids, signal);
+        const result = { ...await details(requested, signal), requested_product_ids: requested };
         if (name === 'get_product_details') return { status: result.products.length ? 'ok' : 'empty', observed_at: stamp(), ...result };
         const criteria = args.criteria.filter(value => VERIFIED.includes(value));
         const comparison = { criteria, not_verified: args.criteria.filter(value => !VERIFIED.includes(value)),
             rows: result.products.map(row => ({ product_id: row.product_id,
                 ...(criteria.includes('price') ? { price: row.price } : {}),
                 ...(criteria.includes('stock') ? { stock_quantity: row.stock_quantity, available: row.available } : {}),
+                ...(criteria.includes('species') ? { pet_types: row.pet_types } : {}),
                 ...(criteria.includes('category') ? { category_id: row.category_id, category_name: row.category_name } : {}) })) };
         if (criteria.includes('price') && result.products.length >= 2) {
             const minimum = result.products.reduce((best, row) => cents(row.price) < best ? cents(row.price) : best, cents(result.products[0].price));

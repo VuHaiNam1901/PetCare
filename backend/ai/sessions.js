@@ -1,5 +1,6 @@
 const { randomBytes, createHmac, createHash, timingSafeEqual } = require('node:crypto');
 const { measure, measureSync } = require('./metrics');
+const { redactPersonal } = require('./grounding');
 
 function chatError(status, code, message) {
     return Object.assign(new Error(message), { status, code, chatSafe: true });
@@ -53,6 +54,8 @@ function historyMessage(row) {
     // Older plain-text answers remain useful, without exposing envelope fields.
     const item = { role: 'assistant', text: response ? response.message : row.message };
     if (response && Array.isArray(response.products)) item.product_ids = response.products.map(product => product.product_id).filter(Number.isInteger);
+    if (typeof response?.follow_up === 'string' && response.follow_up.trim()) item.follow_up = response.follow_up;
+    if (Array.isArray(response?.warnings) && response.warnings.length) item.warnings = response.warnings;
     if (response?.context_search && typeof response.context_search === 'object') item.search = response.context_search;
     return item;
 }
@@ -104,7 +107,7 @@ function envelopeMemory(text) {
 
 function createChatStore({ pool = require('../config/db'), lockTimeoutSeconds = 5 } = {}) {
     return {
-        async withSession({ sessionId, userId = null }, callback) {
+        async withSession({ sessionId, userId = null, requireOwned = false }, callback) {
             const connection = await measure('session_wait_ms', () => pool.getConnection());
             const storageId = sessionStorageId(sessionId);
             const lockName = `pc_chat:${storageId.slice(0, 56)}`;
@@ -115,7 +118,7 @@ function createChatStore({ pool = require('../config/db'), lockTimeoutSeconds = 
                 if (Number(locks[0]?.acquired) !== 1) throw chatError(409, 'SESSION_BUSY', 'Cuộc trò chuyện đang bận. Bạn vui lòng thử lại sau.');
                 locked = true;
                 const [owners] = await measure('mysql_history_load_ms', () => connection.execute('SELECT DISTINCT user_id FROM chat_histories WHERE session_id = ?', [storageId]));
-                if (owners.some(row => (row.user_id == null ? null : String(row.user_id)) !== (userId == null ? null : String(userId)))) {
+                if ((requireOwned && owners.length === 0) || owners.some(row => (row.user_id == null ? null : String(row.user_id)) !== (userId == null ? null : String(userId)))) {
                     throw chatError(403, 'SESSION_FORBIDDEN', 'Phiên trò chuyện không thuộc tài khoản này hoặc không hợp lệ.');
                 }
                 return await callback({
@@ -143,12 +146,40 @@ function createChatStore({ pool = require('../config/db'), lockTimeoutSeconds = 
                         // invalidates older checkpoints after a flag rollback.
                         return rows.length ? envelopeMemory(rows[0].message) : null;
                     },
+                    async recentTurns() {
+                        const [rows] = await measure('mysql_history_load_ms', () => connection.execute(
+                            "SELECT sender, message FROM chat_histories WHERE session_id = ? AND sender IN ('user', 'assistant') ORDER BY chat_history_id DESC LIMIT 40", [storageId]));
+                        const users = new Map();
+                        const turns = new Map();
+                        for (const row of rows.reverse()) {
+                            if (row.sender === 'user') {
+                                try {
+                                    const saved = JSON.parse(row.message);
+                                    if (saved?.v === 1 && typeof saved.text === 'string' &&
+                                        /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i.test(saved.request_id)) {
+                                        users.set(saved.request_id, redactPersonal(saved.text));
+                                    }
+                                } catch { /* Plain-text legacy turns have no stable request ID. */ }
+                            } else {
+                                const envelope = parseEnvelope(row.message);
+                                if (envelope && users.has(envelope.request_id)) {
+                                    const { message, products = [], warnings = [], follow_up = null, code = 'OK' } = envelope.response;
+                                    // Only the public transcript leaves this store. Checkpoints,
+                                    // hashes, raw exceptions and internal prompts stay private.
+                                    turns.set(envelope.request_id, { request_id: envelope.request_id,
+                                        message: users.get(envelope.request_id),
+                                        response: { message, products, warnings, follow_up, code } });
+                                }
+                            }
+                        }
+                        return [...turns.values()];
+                    },
                     async savePair({ message, requestId, hash, response, memory = null, pipeline = memory == null ? 'legacy' : 'orchestrator' }) {
                         if (!['legacy', 'orchestrator'].includes(pipeline) ||
                             (pipeline === 'legacy' && memory != null) ||
                             (pipeline === 'orchestrator' && memory == null)) throw memoryError();
                         const checkpoint = memory == null ? null : memoryCheckpoint(memory);
-                        const userMessage = storageJson({ v: 1, request_id: requestId, text: message });
+                        const userMessage = storageJson({ v: 1, request_id: requestId, text: redactPersonal(message) });
                         const envelope = storageJson({ v: 1, request_id: requestId, request_hash: hash, response,
                             memory: checkpoint, pipeline });
                         if (Buffer.byteLength(envelope, 'utf8') > 60000 || Buffer.byteLength(userMessage, 'utf8') > 60000) throw chatError(503, 'RESPONSE_TOO_LARGE', 'Không thể lưu câu trả lời. Bạn vui lòng thử lại.');
@@ -165,13 +196,54 @@ function createChatStore({ pool = require('../config/db'), lockTimeoutSeconds = 
                                 try { await measure('mysql_history_save_ms', () => connection.rollback()); }
                                 catch { connection.destroy(); destroyed = true; }
                             }
-                            throw error;
+                            // A failed COMMIT response may be ambiguous. A retry uses the
+                            // same UUID and checks the committed envelope before generating.
+                            throw chatError(503, 'HISTORY_SAVE_FAILED', 'Chưa xác nhận lưu được lượt trò chuyện này. Vui lòng nhấn Thử lại để kiểm tra và tiếp tục.');
                         }
                     }
                 });
             } finally {
                 if (locked && !destroyed) {
                     try { await measure('mysql_session_ms', () => connection.execute('SELECT RELEASE_LOCK(?) AS released', [lockName])); }
+                    catch { connection.destroy(); destroyed = true; }
+                }
+                if (!destroyed) connection.release();
+            }
+        },
+        async claimGuestSession({ sessionId, userId }) {
+            if (!Number.isSafeInteger(userId) || userId < 1) throw chatError(403, 'SESSION_FORBIDDEN', 'Không thể chuyển phiên trò chuyện.');
+            const connection = await pool.getConnection();
+            const storageId = sessionStorageId(sessionId);
+            const lockName = `pc_chat:${storageId.slice(0, 56)}`;
+            let locked = false, started = false, destroyed = false;
+            try {
+                const [locks] = await connection.execute('SELECT GET_LOCK(?, ?) AS acquired', [lockName, lockTimeoutSeconds]);
+                if (Number(locks[0]?.acquired) !== 1) throw chatError(409, 'SESSION_BUSY', 'Cuộc trò chuyện đang bận. Vui lòng thử lại.');
+                locked = true;
+                await connection.beginTransaction();
+                started = true;
+                const [rows] = await connection.execute('SELECT user_id FROM chat_histories WHERE session_id = ? FOR UPDATE', [storageId]);
+                const guest = rows.every(row => row.user_id == null);
+                const owned = rows.length > 0 && rows.every(row => String(row.user_id) === String(userId));
+                if (!guest && !owned) throw chatError(403, 'SESSION_FORBIDDEN', 'Phiên trò chuyện không thuộc tài khoản này.');
+                if (rows.length && guest) {
+                    const [updated] = await connection.execute('UPDATE chat_histories SET user_id = ? WHERE session_id = ? AND user_id IS NULL', [userId, storageId]);
+                    if (updated.affectedRows !== rows.length) throw chatError(409, 'SESSION_BUSY', 'Phiên trò chuyện đã thay đổi. Vui lòng thử lại.');
+                }
+                await connection.commit();
+                started = false;
+                // The session ID, request UUIDs, messages and memory envelopes
+                // stay unchanged. An empty capability gets a new user signature.
+                return { empty: rows.length === 0, replayed: owned };
+            } catch (error) {
+                if (started) {
+                    try { await connection.rollback(); }
+                    catch { connection.destroy(); destroyed = true; }
+                }
+                throw error;
+            } finally {
+                if (locked && !destroyed) {
+                    try { await connection.execute('SELECT RELEASE_LOCK(?) AS released', [lockName]); }
                     catch { connection.destroy(); destroyed = true; }
                 }
                 if (!destroyed) connection.release();

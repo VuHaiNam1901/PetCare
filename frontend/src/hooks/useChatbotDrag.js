@@ -57,7 +57,18 @@ export default function useChatbotDrag(open, identity) {
     });
   }, []);
 
-  useLayoutEffect(() => { paint(position.current || savedPosition()); }, [open, identity, paint]);
+  // The keyed ChatSession replaces its portal after auth/history restoration,
+  // even when open and identity stay the same. Position every attached panel
+  // immediately; an effect depending only on open/identity misses that DOM swap.
+  const attachPanel = useCallback(panel => {
+    panelRef.current = panel;
+    if (panel) paint(position.current || savedPosition());
+  }, [paint]);
+
+  useLayoutEffect(() => {
+    paint(position.current || savedPosition());
+    if (position.current) savePosition(position.current);
+  }, [open, identity, paint]);
 
   useEffect(() => {
     const resize = () => { paint(position.current); if (position.current) savePosition(position.current); };
@@ -115,6 +126,6 @@ export default function useChatbotDrag(open, identity) {
     return true;
   };
 
-  return { widgetRef, panelRef, dragging, consumeDragClick,
+  return { widgetRef, panelRef: attachPanel, dragging, consumeDragClick,
     dragEvents: { onPointerDown: pointerDown, onPointerMove: pointerMove, onPointerUp: pointerEnd, onPointerCancel: pointerEnd, onLostPointerCapture: pointerEnd } };
 }
