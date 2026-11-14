@@ -1,6 +1,7 @@
 const express = require('express');
 const { authenticate, authorize } = require('../middleware/auth');
 const catalog = require('../models/catalog');
+const petTypes = require('../models/pet-types');
 const router = express.Router();
 router.use(authenticate, authorize('admin'));
 const states = ['Đang bán', 'Ngừng bán'];
@@ -32,7 +33,7 @@ function image(value) {
 function input(req, kind) {
     if (Object.keys(req.query).length) bad('Query parameters are not supported');
     const body = req.body;
-    const allowed = kind === 'product' ? ['category_id', 'name', 'description', 'price', 'stock_quantity', 'image_url', 'status'] : ['name', 'description'];
+    const allowed = kind === 'product' ? ['category_id', 'name', 'description', 'price', 'stock_quantity', 'image_url', 'status', 'pet_type_ids'] : ['name', 'description'];
     if (!body || typeof body !== 'object' || Array.isArray(body) || !Object.keys(body).length || Object.keys(body).some(key => !allowed.includes(key))) bad('Unsupported or missing fields');
     const data = {};
     if ('name' in body) data.name = text(body.name, kind === 'product' ? 150 : 100);
@@ -41,6 +42,12 @@ function input(req, kind) {
         if (kind === 'product' && data.description !== null && Buffer.byteLength(data.description, 'utf8') > 65535) bad('Description exceeds MySQL TEXT capacity');
     }
     if (kind === 'product') {
+        if ('pet_type_ids' in body) {
+            if (!Array.isArray(body.pet_type_ids) || body.pet_type_ids.length > petTypes.types.length ||
+                body.pet_type_ids.some(value => !integer(value) || value === 0 || value > petTypes.types.length) ||
+                new Set(body.pet_type_ids).size !== body.pet_type_ids.length) bad('Invalid pet_type_ids');
+            data.pet_type_ids = [...body.pet_type_ids].sort((a, b) => a - b);
+        }
         if ('category_id' in body) { if (!integer(body.category_id) || body.category_id === 0) bad('Invalid category_id'); data.category_id = body.category_id; }
         if ('price' in body) data.price = price(body.price);
         if ('stock_quantity' in body) { if (!integer(body.stock_quantity)) bad('Stock must be a nonnegative integer'); data.stock_quantity = body.stock_quantity; }
@@ -62,7 +69,7 @@ function id(req) {
 const handle = action => async (req, res, next) => {
     try { await action(req, res); }
     catch (error) {
-        if (error.status) return res.status(error.status).json({ success: false, message: error.message });
+        if (error.status) return res.status(error.status).json({ success: false, message: error.message, ...(error.code ? { code: error.code } : {}) });
         next(error);
     }
 };
@@ -79,6 +86,10 @@ router.get('/products', handle(async (req, res) => {
     for (const key of ['min_price', 'max_price']) if (req.query[key] !== undefined) filters[key] = price(req.query[key]);
     if (filters.min_price !== undefined && filters.max_price !== undefined && BigInt(filters.min_price.replace('.', '')) > BigInt(filters.max_price.replace('.', ''))) bad('min_price exceeds max_price');
     res.json({ success: true, page: filters.page, limit: filters.limit, ...await catalog.listProducts(filters) });
+}));
+router.get('/pet-types', handle(async (req, res) => {
+    if (Object.keys(req.query).length) bad('Query parameters are not supported');
+    res.json({ success: true, ...await petTypes.list({ availableOnly: false }) });
 }));
 router.post('/products', handle(async (req, res) => res.status(201).json({ success: true, product: await catalog.createProduct(req.user.user_id, input(req, 'product')) })));
 router.put('/products/:id', handle(async (req, res) => res.json({ success: true, product: await catalog.updateProduct(req.user.user_id, id(req), input(req, 'product')) })));

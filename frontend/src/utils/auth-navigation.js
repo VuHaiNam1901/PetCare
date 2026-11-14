@@ -9,9 +9,17 @@ export function safeReturnUrl(value, fallback = '/') {
   try {
     const url = new URL(value, window.location.origin);
     if (url.origin !== window.location.origin || /%2f|%5c/i.test(url.pathname)) return fallback;
-    if (!['/', '/products', '/cart', '/checkout', '/my-orders', '/profile', '/admin/orders', '/admin/products', '/admin/categories', '/admin/users', '/admin/vouchers'].includes(url.pathname) && !/^\/(?:products|my-orders|admin\/orders)\/[1-9]\d*$/.test(url.pathname) && !/^\/my-orders\/[1-9]\d*\/review\/[1-9]\d*$/.test(url.pathname)) return fallback;
+    if (!['/', '/products', '/cart', '/checkout', '/my-orders', '/wishlist', '/profile', '/admin/orders', '/admin/products', '/admin/categories', '/admin/users', '/admin/vouchers'].includes(url.pathname) && !/^\/(?:products|my-orders|admin\/orders)\/[1-9]\d*$/.test(url.pathname) && !/^\/products\/[1-9]\d*\/reviews$/.test(url.pathname) && !/^\/my-orders\/[1-9]\d*\/review\/[1-9]\d*$/.test(url.pathname)) return fallback;
     return `${url.pathname}${url.search}${url.hash}`;
   } catch { return fallback; }
+}
+
+export function loginReturnUrl(value, role) {
+  const destination = safeReturnUrl(value);
+  const path = destination.split(/[?#]/, 1)[0];
+  const adminPage = path.startsWith('/admin/');
+  if (role === 'admin') return adminPage || path === '/profile' ? destination : '/admin/orders';
+  return adminPage ? '/' : destination;
 }
 
 export function activeAuthRedirect() {
@@ -51,8 +59,12 @@ export function authPageUrl(path, { registered = false } = {}) {
   }
   if (flow) params.set('flow', flow.id);
   else {
-    const returnTo = safeReturnUrl(new URLSearchParams(window.location.search).get('returnTo'), '');
-    if (returnTo) params.set('returnTo', returnTo);
+    const current = new URLSearchParams(window.location.search);
+    const returnTo = safeReturnUrl(current.get('returnTo'), '');
+    if (returnTo) {
+      params.set('returnTo', returnTo);
+      if (current.get('from') === 'wishlist') params.set('from', 'wishlist');
+    }
   }
   if (registered) params.set('registered', '1');
   return `${path}${params.size ? `?${params}` : ''}`;

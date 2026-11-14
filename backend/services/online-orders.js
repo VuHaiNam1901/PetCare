@@ -99,9 +99,15 @@ function createOnlineOrderService({ pool, logger = console } = {}) {
             (order_id,from_status,to_status,action,actor_id,actor_name,reason,created_at,event_key)
             VALUES (?,?,?,?,?,?,?,NOW(3),?)`, [order.order_id, order.status, toStatus, action, actorId, actorName, reason, eventKey]);
     }
-    async function release(db, order) {
+    // The caller owns the order/payment locks and has checked order consistency.
+    // This also serves legacy orders whose reservation was verified by migration
+    // 005 from their checkout fingerprint rather than a reservation timestamp.
+    async function releaseStockLocked(db, order) {
         if (order.stock_restored_at) return false;
-        if (!order.stock_reserved_at || !order.stock_reservation_source) fail('Missing stock reservation proof');
+        const reserved = order.stock_reservation_valid !== undefined
+            ? Boolean(order.stock_reserved_at) && Number(order.stock_reservation_valid) === 1
+            : order.stock_reserved_at && new Date(order.stock_reserved_at).getFullYear() > 1000 && new Date(order.stock_reserved_at).getTime() <= Date.now();
+        if (!reserved && order.stock_reservation_source !== 'checkout-v4-fingerprint') fail('Missing stock reservation proof');
         const [lines] = await db.execute('SELECT product_id,quantity FROM order_details WHERE order_id = ? ORDER BY product_id FOR UPDATE', [order.order_id]);
         if (!lines.length) fail('Order has no inventory lines');
         const quantities = new Map();
@@ -153,7 +159,7 @@ function createOnlineOrderService({ pool, logger = console } = {}) {
         const times = await timing(db, order.order_id), now = await clock(db);
         if (now.milliseconds < times.expires) return { expired: false };
         if (order.voucher_code_snapshot) await require('../models/voucher').releaseLocked(db, order);
-        await release(db, order);
+        await releaseStockLocked(db, order);
         await db.execute("UPDATE orders SET status = 'Đã hủy', cancelled_at = ?, cancellation_reason_code = 'payment_expired' WHERE order_id = ?", [now.sql, order.order_id]);
         await db.execute("UPDATE payments SET payment_status = 'Đã hủy' WHERE payment_id = ?", [payment.payment_id]);
         await append(db, order, 'Đã hủy', 'payment_expired', `expiry:${order.order_id}`, { reason: 'Đơn Online hết hạn thanh toán 24 giờ.' });
@@ -187,14 +193,15 @@ function createOnlineOrderService({ pool, logger = console } = {}) {
             return { expired: false, compensation_pending: true, compensation_error: code };
         }
     }
-    async function rejectLocked(db, order, payment, { reason, actorId, actorName }) {
+    async function cancelOnlineLocked(db, order, payment, { reason, actorId, actorName, customer = false }) {
         checkOrder(order, payment);
         if (order.status === 'Đã hủy') {
-            if (order.cancellation_reason_code !== 'admin_rejected' || order.rejection_reason !== reason) fail('Order was already cancelled for another reason');
+            if (customer || order.cancellation_reason_code !== 'admin_rejected' || order.rejection_reason !== reason) fail('Order was already cancelled for another reason');
             return { changed: false };
         }
         if (order.approved_at || !['Chờ thanh toán', 'Chờ xử lý'].includes(order.status)) fail('Only orders awaiting approval or payment can be rejected');
         if (typeof reason !== 'string' || !reason.trim() || [...reason.trim()].length > 500) fail('A rejection reason is required', 400);
+        const reasonCode = customer ? 'customer_cancelled' : 'admin_rejected';
         const now = await clock(db);
         if (payment.payment_status === 'Đã thanh toán') {
             // A summary is not enough to authorize a financial request either.
@@ -202,15 +209,17 @@ function createOnlineOrderService({ pool, logger = console } = {}) {
             await assertAppliedPayment(db, order, payment);
             const [captures] = await db.execute("SELECT * FROM payment_attempts WHERE payment_id = ? AND status = 'succeeded' AND disposition = 'applied' ORDER BY attempt_id FOR UPDATE", [payment.payment_id]);
             if (captures.length !== 1 || !payment.transaction_date) fail('Paid order has no unique verified applied capture');
-            await requestRefund(db, captures[0], 'admin_rejected', now);
+            await requestRefund(db, captures[0], reasonCode, now);
         } else if (!['Chưa thanh toán', 'Thất bại'].includes(payment.payment_status) || payment.transaction_date) fail('Payment state requires review');
         if (order.voucher_code_snapshot) await require('../models/voucher').releaseLocked(db, order);
-        await release(db, order);
-        await db.execute("UPDATE orders SET status = 'Đã hủy', rejection_reason = ?, cancelled_at = ?, cancellation_reason_code = 'admin_rejected' WHERE order_id = ?", [reason.trim(), now.sql, order.order_id]);
+        await releaseStockLocked(db, order);
+        await db.execute("UPDATE orders SET status = 'Đã hủy', rejection_reason = ?, cancelled_at = ?, cancellation_reason_code = ? WHERE order_id = ?", [customer ? null : reason.trim(), now.sql, reasonCode, order.order_id]);
         if (payment.payment_status !== 'Đã thanh toán') await db.execute("UPDATE payments SET payment_status = 'Đã hủy' WHERE payment_id = ?", [payment.payment_id]);
-        await append(db, order, 'Đã hủy', 'reject', `reject:${order.order_id}`, { reason: reason.trim(), actorId, actorName });
+        await append(db, order, 'Đã hủy', customer ? 'cancel' : 'reject', `${customer ? 'customer-cancel' : 'reject'}:${order.order_id}`, { reason: reason.trim(), actorId, actorName });
         return { changed: true };
     }
+    const rejectLocked = (db, order, payment, options) => cancelOnlineLocked(db, order, payment, { ...options, customer: false });
+    const cancelLocked = (db, order, payment, options) => cancelOnlineLocked(db, order, payment, { ...options, customer: true });
     async function createAttempt(userId, orderId, key) {
         if (typeof key !== 'string' || !/^[A-Za-z0-9_-]{16,128}$/.test(key)) fail('Invalid payment idempotency key', 400);
         const result = await transaction(async db => {
@@ -418,10 +427,10 @@ function createOnlineOrderService({ pool, logger = console } = {}) {
         }
         return { scanned: candidates.length, expired, skipped, errors, nextCursor: candidates.at(-1)?.order_id ?? afterOrderId };
     }
-    return { assertReady, assertAppliedPayment, createAttempt, simulate, confirmProviderEvent, confirmRefundEvent, rejectLocked, expireLocked, expireBatch, readRefunds };
+    return { assertReady, assertAppliedPayment, createAttempt, simulate, confirmProviderEvent, confirmRefundEvent, rejectLocked, cancelLocked, releaseStockLocked, expireLocked, expireBatch, readRefunds };
 }
 
 let singleton;
 const defaultService = () => singleton ||= createOnlineOrderService();
 module.exports = { createOnlineOrderService, isNewOnline };
-for (const name of ['assertReady', 'assertAppliedPayment', 'createAttempt', 'simulate', 'confirmProviderEvent', 'confirmRefundEvent', 'rejectLocked', 'expireLocked', 'expireBatch', 'readRefunds']) module.exports[name] = (...args) => defaultService()[name](...args);
+for (const name of ['assertReady', 'assertAppliedPayment', 'createAttempt', 'simulate', 'confirmProviderEvent', 'confirmRefundEvent', 'rejectLocked', 'cancelLocked', 'releaseStockLocked', 'expireLocked', 'expireBatch', 'readRefunds']) module.exports[name] = (...args) => defaultService()[name](...args);

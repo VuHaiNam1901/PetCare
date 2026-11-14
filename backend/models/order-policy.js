@@ -12,7 +12,7 @@ function consistentV2(order, payment) {
     const paid = payment.payment_status === 'Đã thanh toán';
     if (paid !== Boolean(payment.transaction_date)) fail('Thời điểm xác nhận thanh toán không nhất quán.');
     if (order.status === 'Đã hủy') {
-        if (!order.stock_restored_at || !order.cancelled_at || !['admin_rejected', 'payment_expired'].includes(order.cancellation_reason_code) ||
+        if (!order.stock_restored_at || !order.cancelled_at || !['admin_rejected', 'payment_expired', 'customer_cancelled'].includes(order.cancellation_reason_code) ||
             !['Đã hủy', 'Đã thanh toán'].includes(payment.payment_status) ||
             (order.cancellation_reason_code === 'admin_rejected' && !order.rejection_reason)) fail('Dữ liệu hủy đơn/hoàn tồn cần được kiểm tra.');
         return;
@@ -33,7 +33,8 @@ function consistent(order, payment) {
     if (isV2(order)) return consistentV2(order, payment);
     if (order.workflow_version != null) fail('Phiên bản nghiệp vụ đơn hàng chưa được hỗ trợ.');
     if (order.status === 'Đã hủy') {
-        if (!order.stock_restored_at || payment.payment_status !== 'Đã hủy' || !order.rejection_reason) fail('Dữ liệu đơn bị từ chối/tồn kho cần được kiểm tra.');
+        const customerCancelled = order.cancellation_reason_code === 'customer_cancelled' && order.cancellation_reason && order.cancelled_at;
+        if (!order.stock_restored_at || payment.payment_status !== 'Đã hủy' || (!order.rejection_reason && !customerCancelled)) fail('Dữ liệu đơn bị hủy/tồn kho cần được kiểm tra.');
         return;
     }
     const allowedPayments = payment.payment_method === 'ONLINE' ? ['Chưa thanh toán', 'Thất bại', 'Đã thanh toán'] : ['Chưa thanh toán', 'Đã thanh toán'];
@@ -53,6 +54,7 @@ function consistent(order, payment) {
 
 function approvalState(order) {
     if (order.status === 'Đã hủy' && order.rejection_reason) return 'rejected';
+    if (order.status === 'Đã hủy' && order.cancellation_reason_code === 'customer_cancelled') return 'cancelled';
     if (isV2(order)) {
         if (order.status === 'Đã hủy') return 'cancelled';
         if (order.approved_at) return 'approved';
@@ -61,6 +63,12 @@ function approvalState(order) {
     if (order.approved_at) return 'approved';
     if (!order.stock_restored_at && order.status === (order.payment_method === 'COD' ? 'Chờ xử lý' : 'Chờ thanh toán')) return 'pending';
     return 'legacy';
+}
+
+function customerCanCancel(order, payment) {
+    if (order.approved_at || order.stock_restored_at || !['Chờ xử lý', 'Chờ thanh toán'].includes(order.status)) return false;
+    try { consistent(order, payment); } catch { return false; }
+    return true;
 }
 
 function decorate(order) {
@@ -75,7 +83,9 @@ function decorate(order) {
         else if (order.status === 'Chờ giao hàng') allowed_actions.push('ship');
         else if (order.status === 'Đang giao hàng') allowed_actions.push('deliver');
     }
-    return { ...order, approval_state, allowed_actions, review_required: Boolean(review_message), review_reason: review_message };
+    return { ...order, approval_state, allowed_actions,
+        can_cancel: customerCanCancel(order, { payment_method: order.payment_method, payment_status: order.payment_status, amount: order.payment_amount, transaction_date: order.transaction_date }),
+        review_required: Boolean(review_message), review_reason: review_message };
 }
 
-module.exports = { states, consistent, approvalState, decorate, isV2 };
+module.exports = { states, consistent, approvalState, decorate, isV2, customerCanCancel };

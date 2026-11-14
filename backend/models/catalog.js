@@ -1,4 +1,5 @@
 const pool = require('../config/db');
+const petTypes = require('./pet-types');
 const fail = (status, message) => { throw Object.assign(new Error(message), { status }); };
 const productFields = ['category_id', 'name', 'description', 'price', 'stock_quantity', 'image_url', 'status'];
 const categoryFields = ['name', 'description'];
@@ -28,7 +29,7 @@ async function requireCategory(db, categoryId) {
 async function product(db, productId) {
     const [[row]] = await db.execute(`SELECT p.*, c.name AS category_name FROM products p
         JOIN categories c ON c.category_id = p.category_id WHERE p.product_id = ?`, [productId]);
-    return row;
+    return (await petTypes.attach(db, [row])).products[0];
 }
 async function category(db, categoryId) {
     const [[row]] = await db.execute('SELECT category_id, name, description, created_at FROM categories WHERE category_id = ?', [categoryId]);
@@ -40,6 +41,7 @@ exports.createProduct = (adminId, data) => mutation(adminId, async db => {
     const [result] = await db.execute(`INSERT INTO products
         (category_id, name, description, price, stock_quantity, image_url, status, created_at)
         VALUES (?, ?, ?, ?, ?, ?, ?, NOW())`, productFields.map(field => data[field]));
+    if (Object.hasOwn(data, 'pet_type_ids')) await petTypes.replace(db, result.insertId, data.pet_type_ids);
     return product(db, result.insertId);
 });
 exports.updateProduct = (adminId, productId, data) => mutation(adminId, async db => {
@@ -47,7 +49,8 @@ exports.updateProduct = (adminId, productId, data) => mutation(adminId, async db
     if (!rows.length) fail(404, 'Product not found');
     if (Object.hasOwn(data, 'category_id')) await requireCategory(db, data.category_id);
     const fields = productFields.filter(field => Object.hasOwn(data, field));
-    await db.execute(`UPDATE products SET ${fields.map(field => `\`${field}\` = ?`).join(', ')} WHERE product_id = ?`, [...fields.map(field => data[field]), productId]);
+    if (fields.length) await db.execute(`UPDATE products SET ${fields.map(field => `\`${field}\` = ?`).join(', ')} WHERE product_id = ?`, [...fields.map(field => data[field]), productId]);
+    if (Object.hasOwn(data, 'pet_type_ids')) await petTypes.replace(db, productId, data.pet_type_ids);
     return product(db, productId);
 });
 // Never hard-delete products: retain order/cart/review references and image files.
@@ -71,8 +74,9 @@ exports.listProducts = async filters => {
         const [products] = await db.query(`SELECT p.*, c.name AS category_name FROM products p
             JOIN categories c ON c.category_id = p.category_id ${where}
             ORDER BY p.product_id DESC LIMIT ? OFFSET ?`, [...params, filters.limit, (filters.page - 1) * filters.limit]);
+        const result = await petTypes.attach(db, products);
         await db.commit();
-        return { total, products };
+        return { total, ...result };
     } catch (error) { await db.rollback(); throw error; }
     finally { db.release(); }
 };

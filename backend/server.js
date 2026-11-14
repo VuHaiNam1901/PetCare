@@ -11,6 +11,7 @@ const adminOrderRoutes = require('./routes/admin-orders');
 const adminCatalogRoutes = require('./routes/admin-catalog');
 const adminUserRoutes = require('./routes/admin-users');
 const reviewRoutes = require('./routes/reviews');
+const catalogRoutes = require('./routes/catalog');
 const { createChatRouter } = require('./routes/chat');
 
 const app = express();
@@ -20,8 +21,10 @@ app.use(cors());
 app.use(express.json());
 app.use('/api', authRoutes);
 app.use('/api', reviewRoutes);
+app.use('/api', catalogRoutes);
 app.use('/api/chat', createChatRouter());
 app.use('/api/cart', cartRoutes);
+app.use('/api/wishlist', require('./routes/wishlist'));
 app.use('/api/orders', orderRoutes);
 app.use('/api/admin/orders', adminOrderRoutes);
 app.use('/api/admin/vouchers', require('./routes/admin-vouchers'));
@@ -81,43 +84,6 @@ app.get('/api/health/tables', async (req, res) => {
     }
 });
 
-
-
-app.get('/api/products', async (req, res) => {
-    try {
-        const [rows] = await pool.query(`
-            SELECT
-                p.product_id,
-                p.category_id,
-                c.name AS category_name,
-                p.name,
-                p.description,
-                p.price,
-                p.stock_quantity,
-                p.image_url,
-                p.status,
-                p.created_at
-            FROM products p
-            INNER JOIN categories c
-                ON p.category_id = c.category_id
-            WHERE p.status = ?
-            ORDER BY p.product_id DESC
-        `, ['Đang bán']);
-
-        res.json({
-            success: true,
-            total: rows.length,
-            products: rows
-        });
-    } catch (error) {
-        console.error('Error fetching products:', error.message);
-
-        res.status(500).json({
-            success: false,
-            message: 'Cannot retrieve products'
-        });
-    }
-});
 
 
 app.get('/api/categories', async (req, res) => {

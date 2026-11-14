@@ -18,6 +18,7 @@ const historyActions = {
   created: 'Đặt hàng',
   approve: 'Duyệt đơn',
   reject: 'Từ chối đơn',
+  cancel: 'Khách hàng hủy đơn',
   status: 'Cập nhật giao hàng',
   payment: 'Ghi nhận thanh toán',
   payment_failed: 'Thanh toán chưa thành công',

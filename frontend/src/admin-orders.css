@@ -97,6 +97,11 @@
 .admin-orders-rejection { border-color: #F0D6D2; background: #FFFAF9; }
 .admin-orders-rejection > h2 > svg { color: #AB4541; }
 .admin-orders-rejection > p { color: #884744; font-size: 12px; line-height: 1.9; }
+.admin-orders-refunds > ul { display: grid; gap: 14px; padding: 0; list-style: none; }
+.admin-orders-refunds li { min-width: 0; padding: 13px; border: 1px solid var(--color-border); border-radius: 6px; background: var(--color-page); overflow-wrap: anywhere; }
+.admin-orders-refunds li > strong { font-size: 12px; }
+.admin-orders-refunds li > p { margin-top: 7px; color: var(--color-muted); font-size: 11px; line-height: 1.9; }
+.admin-orders-refunds > .admin-orders-muted { margin-top: 14px; }
 .admin-orders-dialog { width: min(510px, calc(100% - 32px)); max-height: calc(100dvh - 40px); margin: auto; padding: 25px; border: 1px solid var(--color-border); border-radius: 10px; background: #fff; color: var(--color-text); box-shadow: 0 20px 70px #17324D33; overflow-y: auto; }
 .admin-orders-dialog::backdrop { background: #102D4A66; }
 .admin-orders-dialog-heading { display: flex; align-items: center; gap: 11px; margin-bottom: 18px; }

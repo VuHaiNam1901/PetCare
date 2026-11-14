@@ -586,3 +586,119 @@ test('đăng nhập Admin dùng cùng form nhưng không tải hoặc thao tác 
   const guest = await page.evaluate(() => JSON.parse(localStorage.getItem('petcare.guest-cart.v1')));
   expect(guest.items[0].quantity).toBe(2);
 });
+
+async function mockRoleLogin(page) {
+  const accounts = {
+    admin: { user_id: 950001, full_name: 'Admin điều hướng', email: 'navigation-admin@example.test', role: 'admin', status: 'active' },
+    user: { user_id: 950002, full_name: 'Khách hàng điều hướng', email: 'navigation-user@example.test', role: 'user', status: 'active' },
+  };
+  const emptyCart = { cart_id: null, items: [], total_quantity: 0, subtotal: '0.00', selected_subtotal: '0.00' };
+  const unexpected = [], adminReads = [];
+  await page.route(`${API}/api/**`, async route => {
+    const request = route.request(), path = new URL(request.url()).pathname, method = request.method();
+    const json = (body, status = 200) => route.fulfill({ status, headers: CORS_HEADERS, json: { success: status === 200, ...body } });
+    if (method === 'OPTIONS') return route.fulfill({ status: 204, headers: CORS_HEADERS });
+    if (['/api/products', '/api/categories', '/api/cart/preview'].includes(path)) return route.continue();
+    if (path === '/api/vouchers/readiness' && method === 'GET') return json({ readiness: { ready: false, online_ready: false } });
+    const actor = Object.keys(accounts).find(key => request.headers().authorization === `Bearer auth-navigation-${key}`);
+    if (path === '/api/auth/me' && method === 'GET') return actor ? json({ user: accounts[actor] }) : json({ message: 'Invalid or expired token' }, 401);
+    if (path === '/api/auth/login' && method === 'POST') {
+      const input = request.postDataJSON();
+      const selected = Object.keys(accounts).find(key => accounts[key].email === input.email);
+      if (!selected || input.password === 'invalid') return json({ message: 'Invalid email or password' }, 401);
+      return json({ token: `auth-navigation-${selected}`, user: accounts[selected] });
+    }
+    if (path === '/api/cart' && method === 'GET' && actor === 'user') return json({ cart: emptyCart });
+    if (path.startsWith('/api/admin/') && method === 'GET' && actor === 'admin') {
+      adminReads.push(path);
+      return json({ page: 1, limit: 20, total: 0, orders: [], products: [], categories: [], users: [], vouchers: [] });
+    }
+    unexpected.push({ path, method, actor });
+    return route.abort();
+  });
+  const signIn = async (actor, destination, password = 'Synthetic-login-only!') => {
+    await page.getByLabel('Email', { exact: true }).fill(accounts[actor].email);
+    await page.getByLabel('Mật khẩu', { exact: true }).fill(password);
+    await page.getByRole('button', { name: 'Đăng nhập', exact: true }).click();
+    if (destination) await expect(page).toHaveURL(destination);
+  };
+  const signOut = async () => {
+    await page.locator('.account-trigger').click();
+    await page.locator('.account-menu-logout').click();
+    await expect(page).toHaveURL(/\/login$/);
+    await expect(page.getByRole('button', { name: 'Đăng nhập', exact: true })).toBeEnabled();
+    expect(await page.evaluate(() => sessionStorage.getItem('petcare.auth.token.v1'))).toBeNull();
+  };
+  return { signIn, signOut, unexpected, adminReads };
+}
+
+test('auth-navigation: User về Trang chủ khi returnTo trỏ tới bất kỳ trang Admin nào', async ({ page }) => {
+  const account = await mockRoleLogin(page);
+  for (const destination of ['/admin/orders', '/admin/orders/801', '/admin/products?q=pet', '/admin/categories', '/admin/users', '/admin/vouchers']) {
+    await page.goto(`/login?returnTo=${encodeURIComponent(destination)}`);
+    await account.signIn('user', /\/$/);
+    await expect(page.locator('#hero-title')).toBeVisible();
+    await expect(page.locator('.account-trigger')).toContainText('Khách hàng điều hướng');
+    await account.signOut();
+  }
+  expect(account.adminReads).toEqual([]);
+  expect(account.unexpected).toEqual([]);
+});
+
+test('auth-navigation: Admin giữ trang quản trị hợp lệ, mặc định về quản lý đơn hàng', async ({ page }) => {
+  const account = await mockRoleLogin(page);
+  await page.goto('/login');
+  await account.signIn('admin', /\/admin\/orders$/);
+  await expect(page.getByRole('heading', { name: 'Quản lý đơn hàng', exact: true })).toBeVisible();
+  await account.signOut();
+  await page.goto('/login?returnTo=%2Fadmin%2Fproducts%3Fq%3Dpet');
+  await account.signIn('admin', /\/admin\/products\?q=pet$/);
+  await expect(page.locator('.account-trigger')).toContainText('Quản trị viên');
+  expect(account.unexpected).toEqual([]);
+});
+
+test('auth-navigation: chuyển Admin → User → Admin không giữ đường dẫn cũ, thông báo có tích xanh và animation', async ({ page }) => {
+  const account = await mockRoleLogin(page);
+  await page.goto('/admin/orders');
+  await expect(page).toHaveURL(/\/login\?returnTo=/);
+  await account.signIn('admin', /\/admin\/orders$/);
+  await account.signOut();
+  await account.signIn('user', /\/$/);
+  const notice = page.locator('.feature-notice');
+  await expect(notice).toContainText('Đã đăng nhập.');
+  await expect(notice.locator('.feature-notice-icon')).toHaveCSS('color', 'rgb(36, 134, 95)');
+  await expect(notice).toHaveCSS('animation-name', 'notice-enter');
+  await expect(page.locator('#main-content')).toHaveCSS('animation-name', 'page-enter');
+  await notice.getByRole('button', { name: 'Đóng thông báo' }).click();
+  await expect(notice).toHaveClass(/is-leaving/);
+  await expect(notice).toHaveCount(0);
+  await account.signOut();
+  await account.signIn('admin', /\/admin\/orders$/);
+  await expect(page.locator('.feature-notice--success .feature-notice-icon')).toBeVisible();
+  expect(account.unexpected).toEqual([]);
+});
+
+test('auth-navigation: giữ returnTo công khai và tôn trọng giảm chuyển động', async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  const account = await mockRoleLogin(page);
+  await page.goto('/login?returnTo=%2Fproducts%3Fq%3Dpet');
+  await account.signIn('user', /\/products\?q=pet$/);
+  const notice = page.locator('.feature-notice--success');
+  await expect(notice.locator('.feature-notice-icon')).toBeVisible();
+  await expect(notice).toHaveCSS('animation-name', 'none');
+  await expect(page.locator('#main-content')).toHaveCSS('animation-name', 'none');
+  await notice.getByRole('button', { name: 'Đóng thông báo' }).click();
+  await expect(notice).toHaveCount(0);
+  expect(account.unexpected).toEqual([]);
+});
+
+test('auth-navigation: đăng nhập thất bại giữ nguyên trang và không hiện thành công', async ({ page }) => {
+  const account = await mockRoleLogin(page);
+  await page.goto('/login?returnTo=%2Fadmin%2Forders');
+  await account.signIn('user', null, 'invalid');
+  await expect(page.locator('.commerce-action-error')).toContainText('Email hoặc mật khẩu không đúng.');
+  await expect(page).toHaveURL(/\/login\?returnTo=/);
+  await expect(page.locator('.feature-notice--success')).toHaveCount(0);
+  expect(await page.evaluate(() => sessionStorage.getItem('petcare.auth.token.v1'))).toBeNull();
+  expect(account.unexpected).toEqual([]);
+});

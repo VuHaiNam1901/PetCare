@@ -139,6 +139,44 @@ test('từ chối bắt buộc lý do, lưu đúng Unicode và hiển thị lị
   noUnexpected(fixture);
 });
 
+test('Admin xem đúng đơn khách hủy, lịch sử và trạng thái hoàn tiền chưa hoàn tất', async ({ page }) => {
+  const reason = 'Tôi cần thay đổi địa chỉ nhận hàng.\nGiao tới văn phòng mới 🐾';
+  const cancelledAt = '2026-10-31T10:00:00.000Z';
+  const order = adminOrder(801, {
+    status: 'Đã hủy', approval_state: 'cancelled', payment_method: 'ONLINE', payment_status: 'Đã thanh toán',
+    workflow_version: 2, transaction_date: '2026-10-31T09:00:00.000Z',
+    cancellation_reason_code: 'customer_cancelled', cancellation_reason: reason, cancelled_at: cancelledAt,
+    history: [{ history_id: 2, from_status: 'Chờ xử lý', to_status: 'Đã hủy', action: 'cancel', created_at: cancelledAt, actor_name: users.a.full_name, reason }],
+    refunds: [{ refund_id: 42, amount: '151000.00', currency: 'VND', reason_code: 'customer_cancelled', status: 'requested', requested_at_utc: cancelledAt, confirmed_at_utc: null }],
+  });
+  const fixture = await mockAdminOrders(page, { orders: [order] });
+  await page.route('**/api/vouchers/readiness', route => route.request().method() === 'GET'
+    ? route.fulfill({ headers: { 'access-control-allow-origin': '*' }, json: { success: true, readiness: { ready: false, online_ready: false } } })
+    : route.fallback());
+  await page.goto('/admin/orders');
+  await expect(row(page, 801).locator('.my-order-status')).toHaveText('Đã hủy');
+  await page.getByLabel('Lọc trạng thái đơn', { exact: true }).selectOption('rejected');
+  await expect(row(page, 801)).toHaveCount(0);
+  await page.getByLabel('Lọc trạng thái đơn', { exact: true }).selectOption('Đã hủy');
+  await row(page, 801).getByRole('link', { name: 'Xem chi tiết', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Khách hàng đã hủy đơn', exact: true })).toBeVisible();
+  expect(await page.locator('.admin-orders-cancellation').textContent()).toContain(reason);
+  await expect(page.locator('.admin-orders-cancellation time')).toHaveAttribute('dateTime', cancelledAt);
+  await expect(page.locator('.order-history')).toContainText('Khách hàng hủy đơn');
+  await expect(page.locator('.admin-orders-refunds')).toContainText('Đã ghi nhận yêu cầu hoàn tiền');
+  await expect(page.locator('.admin-orders-refunds li > strong')).not.toHaveText('Đã hoàn tiền');
+  await expect(page.locator('.admin-orders-payment-status')).toHaveText('Đã thanh toán');
+  await expect(page.getByRole('button', { name: 'Duyệt đơn', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Từ chối đơn', exact: true })).toHaveCount(0);
+  order.refunds[0].status = 'succeeded';
+  order.refunds[0].confirmed_at_utc = '2026-10-31T11:00:00.000Z';
+  await page.getByRole('button', { name: 'Cập nhật đơn hàng', exact: true }).click();
+  await expect(page.locator('.admin-orders-refunds li > strong')).toHaveText('Đã hoàn tiền');
+  await expect(page.locator('.admin-orders-refunds')).toContainText('Hoàn tất hoàn tiền');
+  expect(fixture.writes).toEqual([]);
+  noUnexpected(fixture);
+});
+
 test('COD giao hàng tuần tự, chỉ hoàn tất khi xác nhận đã thu tiền', async ({ page }) => {
   const fixture = await mockAdminOrders(page, { orders: [adminOrder(801, { status: 'Chờ giao hàng', approved_at: '2026-10-31T09:00:00.000Z' })] });
   await page.goto('/admin/orders/801');

@@ -12,6 +12,23 @@
 .order-detail-status.my-order-status { margin-left: 0; padding: 7px 10px; font-size: 11px; background: #fff; border: 1px solid currentColor; }
 .order-detail-refresh { display: inline-flex; align-items: center; gap: 6px; min-height: 28px; min-width: 24px; border: 0; background: transparent; color: var(--color-primary-hover); padding: 6px 2px; font-size: 10px; cursor: pointer; }
 .order-detail-refresh:focus-visible { outline: 2px solid var(--color-primary-hover); outline-offset: 3px; border-radius: 4px; }
+.order-detail-cancel-button, .order-cancel-confirm { color: #9a3531; border: 1px solid #d89690; background: #fff5f3; }
+.order-detail-cancel-button:hover, .order-cancel-confirm:hover { background: #ffe8e4; }
+.order-cancel-success { margin-bottom: 20px; padding: 14px 18px; border: 1px solid #bfe5cc; border-radius: 6px; background: #f1fbf4; color: #1e6b3b; font-size: 12px; }
+.order-cancel-dialog { box-sizing: border-box; width: min(520px, calc(100vw - 32px)); max-height: calc(100dvh - 32px); margin: auto; padding: 25px; border: 1px solid var(--color-border); border-radius: 10px; background: #fff; color: var(--color-text); overflow-y: auto; }
+.order-cancel-dialog::backdrop { background: rgb(16 31 48 / 48%); }
+.order-cancel-dialog h2 { margin: 0 0 12px; font-size: 20px; }
+.order-cancel-dialog p { font-size: 12px; line-height: 1.8; overflow-wrap: anywhere; }
+.order-cancel-dialog label { display: block; margin: 18px 0 7px; font-size: 12px; font-weight: 600; }
+.order-cancel-dialog select, .order-cancel-dialog textarea { box-sizing: border-box; width: 100%; min-width: 0; padding: 11px; border: 1px solid var(--color-border); border-radius: 5px; background: #fff; color: var(--color-text); font: inherit; font-size: 12px; }
+.order-cancel-dialog textarea { resize: vertical; }
+.order-cancel-dialog small { display: block; margin-top: 5px; color: var(--color-muted); font-size: 11px; }
+.order-cancel-dialog :focus-visible { outline: 2px solid var(--color-primary-hover); outline-offset: 2px; }
+.order-cancel-payment-note { margin-top: 12px; padding: 10px; background: #fff9eb; border-radius: 5px; color: #7a4f08; }
+.order-cancel-error { margin-top: 16px; padding: 12px; color: #9a3531; border: 1px solid #f1d2cf; border-radius: 5px; background: #fff5f3; }
+.order-cancel-error .button { margin-top: 10px; }
+.order-cancel-actions { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 10px; margin-top: 22px; }
+.order-cancel-dialog button:disabled, .order-detail-refresh:disabled { cursor: wait; opacity: .6; }
 .order-detail-card { min-width: 0; padding: 23px; border: 1px solid var(--color-border); border-radius: 8px; background: #fff; }
 .order-detail-section-heading { display: flex; align-items: center; gap: 9px; margin-bottom: 20px; }
 .order-detail-section-heading > svg { color: var(--color-primary-hover); flex-shrink: 0; }

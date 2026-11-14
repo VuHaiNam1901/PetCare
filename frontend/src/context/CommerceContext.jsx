@@ -7,7 +7,7 @@ import * as profileApi from '../services/profile.js';
 import * as reviewsApi from '../services/reviews.js';
 import * as paymentsApi from '../services/payments.js';
 import * as vouchersApi from '../services/vouchers.js';
-import { AUTH_REDIRECT_KEY, activeAuthRedirect, authPageUrl, clearAuthRedirect, purchaseLoginUrl, safeReturnUrl } from '../utils/auth-navigation.js';
+import { AUTH_REDIRECT_KEY, activeAuthRedirect, authPageUrl, clearAuthRedirect, loginReturnUrl, purchaseLoginUrl, safeReturnUrl } from '../utils/auth-navigation.js';
 import { clearCheckoutDraft, prepareCheckoutDraft, readCheckoutDraft } from '../utils/checkout.js';
 
 export const GUEST_KEY = 'petcare.guest-cart.v1';
@@ -65,8 +65,15 @@ export function CommerceProvider({ children }) {
     return flow && intent?.id === flow.intent_id && !intent.authenticated ? intent : null;
   });
   const [notice, setNotice] = useState('');
+  const [noticeType, setNoticeType] = useState('info');
 
-  const notify = message => setNotice(message);
+  useEffect(() => {
+    if (!notice) return;
+    const timer = window.setTimeout(() => setNotice(''), 3000);
+    return () => window.clearTimeout(timer);
+  }, [notice, noticeType]);
+
+  const notify = (message, type = 'info') => { setNoticeType(type); setNotice(message); };
   const current = generation => { if (epoch.current !== generation) throw Object.assign(new Error('Phiên làm việc đã thay đổi.'), { obsolete: true }); };
   async function commerceApi(path, options) {
     const generation = epoch.current;
@@ -92,8 +99,8 @@ export function CommerceProvider({ children }) {
     clearCheckoutDraft();
     localStorage.removeItem(INTENT_KEY); setPendingIntent(null);
   }
-  function navigateAfterLogin(destination, message) {
-    if (message) sessionStorage.setItem(FLASH_KEY, message);
+  function navigateAfterLogin(destination, message, type = 'info') {
+    if (message) sessionStorage.setItem(FLASH_KEY, JSON.stringify({ message, type }));
     window.location.replace(safeReturnUrl(destination));
   }
   function purchaseIntent(flow) {
@@ -260,14 +267,19 @@ export function CommerceProvider({ children }) {
     (async () => {
       try {
         const flash = sessionStorage.getItem(FLASH_KEY);
-        if (flash) { notify(flash); sessionStorage.removeItem(FLASH_KEY); }
+        if (flash) {
+          let saved;
+          try { saved = JSON.parse(flash); } catch { /* Older pages store plain text. */ }
+          notify(typeof saved?.message === 'string' ? saved.message : flash, saved?.type === 'success' ? 'success' : 'info');
+          sessionStorage.removeItem(FLASH_KEY);
+        }
         const token = sessionStorage.getItem(TOKEN_KEY);
         if (token) {
           tokenRef.current = token;
           const result = await commerceApi('/api/auth/me', { token }); current(generation);
           userRef.current = result.user; setUser(result.user);
           const path = window.location.pathname.replace(/\/+$/, '');
-          if (path === '/my-orders' || path.startsWith('/my-orders/') || path === '/admin/orders' || path.startsWith('/admin/orders/') || path === '/admin/products' || path === '/admin/categories' || path === '/admin/users' || path === '/admin/vouchers' || path === '/profile') {
+          if (path === '/wishlist' || path === '/my-orders' || path.startsWith('/my-orders/') || path === '/admin/orders' || path.startsWith('/admin/orders/') || path === '/admin/products' || path === '/admin/categories' || path === '/admin/users' || path === '/admin/vouchers' || path === '/profile') {
             await synchronize(result.user, generation, { readOnly: true });
           } else {
             await withGuestLock(async () => {
@@ -384,15 +396,15 @@ export function CommerceProvider({ children }) {
     return operation(async () => {
       let flow = activeAuthRedirect();
       const returnTo = safeReturnUrl(new URLSearchParams(window.location.search).get('returnTo'));
-      const explicitOrdersReturn = /^\/(?:my-orders|admin\/orders)(?:\/[1-9]\d*)?(?:[?#]|$)/.test(returnTo) ||
-        /^\/my-orders\/[1-9]\d*\/review\/[1-9]\d*(?:[?#]|$)/.test(returnTo) ||
-        /^\/my-orders\/[1-9]\d*\/payment(?:[?#]|$)/.test(returnTo) || returnTo === '/admin/vouchers' || returnTo === '/profile';
+      const returnPath = returnTo.split(/[?#]/, 1)[0];
+      const explicitAccountReturn = /^\/(?:my-orders|wishlist|admin)(?:\/|$)/.test(returnPath) || returnPath === '/profile';
+      const wishlistReturn = new URLSearchParams(window.location.search).get('from') === 'wishlist';
       const saved = readCheckoutDraft();
       let oldFlow;
       try { oldFlow = JSON.parse(sessionStorage.getItem(AUTH_REDIRECT_KEY) || 'null'); } catch { oldFlow = null; }
       const urlFlow = new URLSearchParams(window.location.search).get('flow');
       const expiredPurchase = oldFlow?.version === 1 && oldFlow.type === 'purchase' && oldFlow.id === urlFlow && oldFlow.intent_id === saved?.intent_id;
-      if (!flow && !explicitOrdersReturn && saved && (saved.submission || expiredPurchase)) {
+      if (!flow && !explicitAccountReturn && !wishlistReturn && saved && (saved.submission || expiredPurchase)) {
         // Renew an expired navigation context without discarding purchase data.
         window.history.replaceState(null, '', purchaseLoginUrl(saved.intent_id));
         flow = activeAuthRedirect();
@@ -408,20 +420,26 @@ export function CommerceProvider({ children }) {
       }
       if (result.user.role === 'admin') {
         beginLogin();
-        navigateAfterLogin(returnTo.startsWith('/admin/orders') || returnTo === '/admin/vouchers' || returnTo === '/profile' ? returnTo : '/admin/orders', 'Đã đăng nhập quản trị viên.');
+        navigateAfterLogin(loginReturnUrl(returnTo, result.user.role), 'Đã đăng nhập quản trị viên.', 'success');
       } else if (!await continuePurchase(result.user, synchronized)) {
-        navigateAfterLogin(returnTo, synchronized ? 'Đã đăng nhập.' : 'Đã đăng nhập. Giỏ khách chưa đồng bộ; mở Giỏ hàng để kiểm tra và thử lại.');
+        navigateAfterLogin(loginReturnUrl(returnTo, result.user.role), synchronized ? 'Đã đăng nhập.' : 'Đã đăng nhập. Giỏ khách chưa đồng bộ; mở Giỏ hàng để kiểm tra và thử lại.', 'success');
       }
       return result.user;
     });
   }
   const register = data => operation(async () => (await commerceApi('/api/auth/register', { method: 'POST', body: data })).user);
-  async function readAccountOrder(path, signal) {
+  async function readAccountOrder(path, signal, options = {}, assertSession) {
     // Order history does not depend on cart edits or an outstanding cart merge.
     if (!userRef.current || !tokenRef.current) throw Object.assign(new Error('Vui lòng đăng nhập để xem đơn hàng.'), { status: 401 });
     if (userRef.current.role !== 'user') throw Object.assign(new Error('Đơn hàng của tôi dành cho tài khoản khách hàng.'), { status: 403 });
-    try { return await commerceApi(path, { token: tokenRef.current, signal }); }
+    assertSession?.();
+    try {
+      const result = await commerceApi(path, { ...options, token: tokenRef.current, signal });
+      assertSession?.();
+      return result;
+    }
     catch (error) {
+      assertSession?.();
       if (!error.obsolete && !signal?.aborted) await expireSession(error);
       throw error;
     }
@@ -438,6 +456,15 @@ export function CommerceProvider({ children }) {
   }
   const getOrder = (orderId, { signal } = {}) => readAccountOrder(orderPath(orderId), signal);
   const getOrderPayment = (orderId, { signal } = {}) => readAccountOrder(`${orderPath(orderId)}/payment`, signal);
+  const assertWishlistSession = () => {
+    if (sessionStorage.getItem(TOKEN_KEY) !== tokenRef.current) throw Object.assign(new Error('Phiên làm việc đã thay đổi.'), { obsolete: true });
+  };
+  const getWishlist = ({ signal } = {}) => readAccountOrder('/api/wishlist', signal, {}, assertWishlistSession);
+  const saveWishlistProduct = (productId, selected) => {
+    if (!positive(productId)) throw new Error('Mã sản phẩm không hợp lệ.');
+    return readAccountOrder(`/api/wishlist/${productId}`, undefined, { method: selected ? 'PUT' : 'DELETE' }, assertWishlistSession);
+  };
+  const cancelOrder = (orderId, body) => readAccountOrder(`${orderPath(orderId)}/cancel`, undefined, { method: 'POST', body });
   async function adminOrderRequest(path, options = {}) {
     if (!userRef.current || !tokenRef.current) throw Object.assign(new Error('Vui lòng đăng nhập để quản lý đơn hàng.'), { status: 401 });
     if (userRef.current.role !== 'admin') throw Object.assign(new Error('Chỉ quản trị viên được quản lý đơn hàng.'), { status: 403 });
@@ -477,6 +504,7 @@ export function CommerceProvider({ children }) {
   }
   const getAdminProducts = (options = {}) => adminProductRequest(token => adminProductsApi.getAdminProducts(token, options), options);
   const getAdminProductCategories = (options = {}) => adminProductRequest(token => adminProductsApi.getAdminProductCategories(token, options), options);
+  const getAdminPetTypes = (options = {}) => adminProductRequest(token => adminProductsApi.getAdminPetTypes(token, options), options);
   const createAdminProduct = body => adminProductRequest(token => adminProductsApi.createAdminProduct(token, body));
   const updateAdminProduct = (productId, body) => adminProductRequest(token => adminProductsApi.updateAdminProduct(token, productId, body));
   const stopAdminProduct = productId => adminProductRequest(token => adminProductsApi.stopAdminProduct(token, productId));
@@ -624,9 +652,10 @@ export function CommerceProvider({ children }) {
     }
   }
   async function logout() {
-    // Explicit logout owns navigation; Checkout's auth effect must not race it
-    // by creating another login flow while the old page is being unloaded.
+    // Pause protected-page auth effects while leaving, so the page being
+    // unloaded cannot overwrite /login with its previous account's returnTo.
     checkoutRedirectRef.current = true;
+    setAuthLoading(true);
     epoch.current++; tokenRef.current = null; userRef.current = null;
     sessionStorage.removeItem(TOKEN_KEY); beginLogin();
     setUser(null); displayCart(emptyCart()); source('guest'); setMerge(false); setCartError('');
@@ -676,7 +705,7 @@ export function CommerceProvider({ children }) {
     return false;
   }
 
-  return <Context.Provider value={{ user, authLoading, cart, cartLoading, cartError, busy, cartSource, mergeError, mergeConflicts, mergeCanEdit, pendingIntent, beginLogin, login, register, logout, retryCart, retryMerge, addItem, updateItem, removeItem, selectItem, selectAll, checkout, buyNow, resumeCheckout, submitOrder, orderCommitted, getOrders, getOrder, getOrderPayment, getAdminOrders, getAdminOrder, approveAdminOrder, rejectAdminOrder, updateAdminOrder, getAdminProducts, getAdminProductCategories, createAdminProduct, updateAdminProduct, stopAdminProduct, getAdminCategories, createAdminCategory, updateAdminCategory, deleteAdminCategory, getAdminUsers, updateAdminUserStatus, getAdminVouchers, getAdminVoucher, createAdminVoucher, updateAdminVoucher, disableAdminVoucher, quoteCheckoutVoucher, getCheckoutVouchers, getProfile, updateProfile, getMyReviews, createProductReview, simulateOrderPayment, notify, notice, clearNotice: () => setNotice('') }}>{children}</Context.Provider>;
+  return <Context.Provider value={{ user, authLoading, cart, cartLoading, cartError, busy, cartSource, mergeError, mergeConflicts, mergeCanEdit, pendingIntent, beginLogin, login, register, logout, retryCart, retryMerge, addItem, updateItem, removeItem, selectItem, selectAll, checkout, buyNow, resumeCheckout, submitOrder, orderCommitted, getOrders, getOrder, getOrderPayment, cancelOrder, getWishlist, saveWishlistProduct, getAdminOrders, getAdminOrder, approveAdminOrder, rejectAdminOrder, updateAdminOrder, getAdminProducts, getAdminProductCategories, getAdminPetTypes, createAdminProduct, updateAdminProduct, stopAdminProduct, getAdminCategories, createAdminCategory, updateAdminCategory, deleteAdminCategory, getAdminUsers, updateAdminUserStatus, getAdminVouchers, getAdminVoucher, createAdminVoucher, updateAdminVoucher, disableAdminVoucher, quoteCheckoutVoucher, getCheckoutVouchers, getProfile, updateProfile, getMyReviews, createProductReview, simulateOrderPayment, notify, notice, noticeType, clearNotice: () => setNotice('') }}>{children}</Context.Provider>;
 }
 
 export function useCommerce() {

@@ -2,8 +2,38 @@ import { useEffect, useState } from 'react';
 import { ChevronRight, Minus, Plus, ShoppingCart } from 'lucide-react';
 import ProductCard, { ProductImage } from '../components/ProductCard.jsx';
 import { ErrorNotice } from '../components/Feedback.jsx';
+import WishlistButton from '../components/WishlistButton.jsx';
+import { ReviewList, ReviewStars, formatReviewAverage } from '../components/ProductReviewContent.jsx';
+import useProductReviews from '../hooks/useProductReviews.js';
 import { BRAND_NAME } from '../config/branding.js';
 import { formatPrice, resolveImageUrl } from '../utils/catalog.js';
+import '../product-reviews.css';
+
+function ProductReviewsPreview({ productId }) {
+  const { data, loading, error, retry } = useProductReviews(productId, { limit: 2 });
+  return (
+    <section className="product-review-preview detail-description-panel" aria-labelledby="product-review-preview-title">
+      <div className="product-review-preview-heading section-heading">
+        <h2 id="product-review-preview-title">Đánh giá sản phẩm</h2>
+        <a className="text-link" href={`/products/${productId}/reviews`}>Xem đánh giá<ChevronRight size={14} aria-hidden="true" /></a>
+      </div>
+      {loading ? (
+        <div role="status" aria-label="Đang tải đánh giá"><div className="skeleton skeleton-line" /><div className="skeleton skeleton-line medium" /><span className="sr-only">Đang tải đánh giá...</span></div>
+      ) : error ? (
+        <ErrorNotice title="Chưa tải được đánh giá" message={error} onRetry={retry} />
+      ) : data ? (
+        <>
+          <div className="product-review-preview-summary">
+            <ReviewStars rating={data.summary.average_rating || 0} />
+            <strong className="product-review-preview-score">{formatReviewAverage(data.summary.average_rating)}{data.summary.total > 0 ? '/5' : ''}</strong>
+            <span>{data.summary.total} lượt đánh giá</span>
+          </div>
+          {data.reviews.length ? <ReviewList reviews={data.reviews} /> : <p className="detail-note">Sản phẩm chưa có đánh giá.</p>}
+        </>
+      ) : null}
+    </section>
+  );
+}
 
 function ProductDetails({ product, categoryName, related, onAction, cartBusy }) {
   const [requestedQuantity, setRequestedQuantity] = useState(1);
@@ -33,8 +63,9 @@ function ProductDetails({ product, categoryName, related, onAction, cartBusy }) 
             </div>
           </div>
           <div className="detail-actions">
-            <button className="button button-outline add-to-cart" type="button" disabled={!available || cartBusy} onClick={() => onAction('Giỏ hàng', product, quantity)}><ShoppingCart size={18} aria-hidden="true" />Thêm vào giỏ hàng</button>
+            <button className="button button-outline add-to-cart" type="button" disabled={!available || cartBusy} onClick={event => onAction('Giỏ hàng', product, quantity, event.currentTarget)}><ShoppingCart size={18} aria-hidden="true" />Thêm vào giỏ hàng</button>
             <button className="button button-primary buy-now" type="button" disabled={!available || cartBusy} onClick={() => onAction('Mua ngay', product, quantity)}>Mua ngay</button>
+            <WishlistButton product={product} onAction={onAction} className="button button-outline detail-favorite" showLabel size={18} />
           </div>
           <p className="detail-note">Mua ngay mở trang đặt hàng với riêng sản phẩm và số lượng đã chọn.</p>
         </div>
@@ -44,6 +75,8 @@ function ProductDetails({ product, categoryName, related, onAction, cartBusy }) 
         <h2 id="description-title">Mô tả sản phẩm</h2>
         <p className="detail-description">{typeof product.description === 'string' && product.description.trim() ? product.description : 'Mô tả sản phẩm đang được cập nhật.'}</p>
       </section>
+
+      <ProductReviewsPreview productId={product.product_id} />
 
       <section className="related-products" aria-labelledby="related-title">
         <div className="section-heading"><h2 id="related-title">Sản phẩm cùng danh mục</h2><a className="text-link" href={`/products?category=${product.category_id}`}>Xem tất cả<ChevronRight size={14} aria-hidden="true" /></a></div>

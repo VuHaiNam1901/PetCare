@@ -76,6 +76,16 @@
 .admin-products-dialog .admin-products-stop-copy { color: var(--color-muted); font-size: 13px; line-height: 1.9; overflow-wrap: anywhere; }
 .admin-products-dialog .admin-products-stop-copy p + p { margin-top: 10px; }
 .admin-products-dialog .admin-products-stop-copy strong { color: var(--color-text); }
+.admin-products-dialog .admin-products-pet-options { min-width: 0; margin: 0; padding: 0; border: 0; }
+.admin-products-dialog .admin-products-pet-options legend { margin-bottom: 10px; color: var(--color-text); font-size: 12px; font-weight: 600; }
+.admin-products-dialog .admin-products-pet-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.admin-products-dialog .admin-products-pet-choice { display: flex; align-items: center; gap: 8px; min-width: 0; padding: 11px; border: 1px solid var(--color-border); border-radius: 5px; color: var(--color-text); font-size: 12px; cursor: pointer; }
+.admin-products-dialog .admin-products-pet-choice:has(input:checked) { border-color: var(--color-primary); background: var(--color-section); }
+.admin-products-dialog .admin-products-pet-choice input { width: 16px; height: 16px; flex-shrink: 0; accent-color: var(--color-primary); }
+.admin-products-dialog .admin-products-pet-options:disabled .admin-products-pet-choice { cursor: default; }
+.admin-products-dialog .admin-products-pet-help { margin-top: 9px; color: var(--color-muted); font-size: 11px; line-height: 1.7; }
+.admin-products-dialog .admin-products-pet-retry { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 12px; margin-top: 8px; font-size: 11px; color: #9E403C; }
+.admin-products-dialog .admin-products-pet-retry .text-link { font-size: 11px; }
 .admin-products-dialog .button:disabled,
 .admin-products-dialog .icon-button:disabled,
 .admin-products-dialog fieldset:disabled { opacity: .65; }
@@ -109,5 +119,6 @@
   .admin-products-dialog { width: calc(100% - 24px); max-height: calc(100dvh - 24px); padding: 20px 16px; }
   .admin-products-dialog .admin-products-dialog-heading h2 { font-size: 19px; }
   .admin-products-dialog .admin-products-form-grid { grid-template-columns: minmax(0, 1fr); gap: 17px; }
+  .admin-products-dialog .admin-products-pet-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .admin-products-dialog .admin-products-dialog-actions .button { flex: 1; padding-inline: 12px; }
 }

@@ -137,6 +137,14 @@ export default function CheckoutPage() {
     if (!saved) setLoading(false);
   }, [authLoading, user?.user_id, user?.role, cartSource]);
 
+  useEffect(() => {
+    if (authLoading || user?.role !== 'user' || !order || order.user_id !== user.user_id) return;
+    // Handles both a confirmed response and a saved result after reload. This
+    // only reads the order; submission locks and the original retry key remain.
+    setRedirecting(true);
+    window.location.replace(`/my-orders/${order.order_id}`);
+  }, [authLoading, user?.user_id, user?.role, order]);
+
   function persist(patch) {
     try {
       const saved = saveCheckoutDraft(user.user_id, { ...patch, intent_id: draft.intent_id });

@@ -1,6 +1,7 @@
 const pool = require('../config/db');
 const { append: appendHistory } = require('./order-history');
-const { approvalState, consistent } = require('./order-policy');
+const { approvalState, consistent, customerCanCancel } = require('./order-policy');
+const history = require('./order-history');
 const workflow = require('../config/order-workflow');
 const clock = require('./order-time');
 
@@ -29,18 +30,23 @@ function view(order, payment) {
         approved_at: order.approved_at, can_simulate: simulationAllowed && rejection(order, payment) === null,
         approval_state: approvalState({ ...order, payment_method: payment.payment_method }),
         rejection_reason: order.rejection_reason,
+        can_cancel: customerCanCancel(order, payment),
+        cancellation_reason_code: order.cancellation_reason_code ?? null,
+        cancellation_reason: order.cancellation_reason ?? null,
+        cancelled_at: order.cancelled_at ?? null,
         simulation_only: true
     };
 }
 
 async function information(db, userId, orderId) {
     // One statement gives a consistent order/payment snapshot without locking GETs.
-    const [[row]] = await db.execute(`SELECT o.*${clock.selectOrderClock('o')}${clock.selectPaymentClock('p')},
+    const [[stored]] = await db.execute(`SELECT o.*${clock.selectOrderClock('o')}${clock.selectPaymentClock('p')},
         p.payment_id, p.payment_method, p.payment_status, p.amount, p.transaction_date, p.created_at
         FROM orders o LEFT JOIN payments p ON p.order_id = o.order_id
         WHERE o.order_id = ? AND o.user_id = ?`, [orderId, userId]);
-    if (!row) fail(404, 'Order not found');
-    clock.normalizeOrderClock(row);
+    if (!stored) fail(404, 'Order not found');
+    clock.normalizeOrderClock(stored);
+    const row = stored.status === 'Đã hủy' ? history.withCancellation(stored, await history.read(db, orderId)) : stored;
     if (!row.payment_id) fail(409, 'Payment record is missing; order needs review');
     if (row.workflow_version === workflow.VERSION) {
         const [[window]] = await db.execute('SELECT payment_expires_at > UTC_TIMESTAMP(3) AS payment_window_open FROM orders WHERE order_id = ?', [orderId]);

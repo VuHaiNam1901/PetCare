@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
-import { Check, ChevronRight, ClipboardList, Home, Pencil, RefreshCw, Save, ShieldCheck, ShoppingCart, UserRound } from 'lucide-react';
+import { Check, ChevronRight, ClipboardList, FolderTree, Home, LogOut, Package, Pencil, RefreshCw, Save, TicketPercent, UserRound, Users } from 'lucide-react';
 import { useCommerce } from '../context/CommerceContext.jsx';
+import { useVoucherReadiness } from '../hooks/useVoucherReadiness.js';
 import { ErrorNotice } from '../components/Feedback.jsx';
 import { safeReturnUrl } from '../utils/auth-navigation.js';
 import { BRAND_NAME } from '../config/branding.js';
@@ -129,7 +130,8 @@ function ProfileContent({ accountId }) {
 }
 
 export default function ProfilePage() {
-  const { user, authLoading } = useCommerce();
+  const { user, authLoading, busy, logout, notify } = useCommerce();
+  const { ready: vouchersReady } = useVoucherReadiness();
   useEffect(() => {
     const previous = document.title;
     document.title = `Thông tin cá nhân | ${BRAND_NAME}`;
@@ -144,7 +146,7 @@ export default function ProfilePage() {
     <nav className="catalog-breadcrumbs" aria-label="Đường dẫn"><a href="/"><Home size={14} aria-hidden="true" />Trang chủ</a><ChevronRight size={13} aria-hidden="true" /><span aria-current="page">Thông tin cá nhân</span></nav>
     <div className="my-orders-page-heading"><div><p className="my-orders-eyebrow">TÀI KHOẢN PETCARE</p><h1>Thông tin cá nhân</h1><p>Quản lý thông tin tài khoản và liên hệ của bạn.</p></div></div>
     {authLoading || !user ? <ProfileLoading label="Đang kiểm tra đăng nhập" /> : <div className="my-orders-layout">
-      <aside className="my-orders-account" aria-label="Điều hướng tài khoản"><div className="my-orders-profile"><span><UserRound size={26} aria-hidden="true" /></span><div><small>Xin chào,</small><strong>{user.full_name || user.email}</strong></div></div><nav aria-label="Tài khoản"><a href="/profile" aria-current="page"><UserRound size={18} aria-hidden="true" />Thông tin cá nhân<ChevronRight size={14} aria-hidden="true" /></a>{user.role === 'admin' ? <a href="/admin/orders"><ShieldCheck size={18} aria-hidden="true" />Quản lý đơn hàng</a> : <><a href="/my-orders"><ClipboardList size={18} aria-hidden="true" />Đơn hàng của tôi</a><a href="/cart"><ShoppingCart size={18} aria-hidden="true" />Giỏ hàng</a></>}<a href="/"><Home size={18} aria-hidden="true" />Về cửa hàng</a></nav></aside>
+      <aside className="my-orders-account" aria-label="Điều hướng tài khoản"><div className="my-orders-profile"><span><UserRound size={26} aria-hidden="true" /></span><div><small>Xin chào,</small><strong>{user.full_name || user.email}</strong></div></div><nav aria-label="Tài khoản"><a href="/profile" aria-current="page"><UserRound size={18} aria-hidden="true" /><span>Thông tin cá nhân</span><ChevronRight size={14} aria-hidden="true" /></a>{user.role === 'admin' ? <><a href="/admin/orders"><ClipboardList size={18} aria-hidden="true" /><span>Quản lý đơn hàng</span></a><a href="/admin/products"><Package size={18} aria-hidden="true" /><span>Quản lý sản phẩm</span></a><a href="/admin/categories"><FolderTree size={18} aria-hidden="true" /><span>Quản lý danh mục</span></a><a href="/admin/users"><Users size={18} aria-hidden="true" /><span>Quản lý người dùng</span></a>{vouchersReady && <a href="/admin/vouchers"><TicketPercent size={18} aria-hidden="true" /><span>Quản lý Voucher</span></a>}</> : <a href="/my-orders"><ClipboardList size={18} aria-hidden="true" /><span>Đơn hàng của tôi</span></a>}<button className="my-orders-account-logout" type="button" disabled={busy} onClick={() => logout().catch(error => notify(error.message))}><LogOut size={18} aria-hidden="true" /><span>Đăng xuất</span></button></nav></aside>
       <div className="my-orders-content"><ProfileContent key={user.user_id} accountId={user.user_id} /></div>
     </div>}
   </div>;

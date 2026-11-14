@@ -21,3 +21,14 @@ exports.read = async (db, orderId) => {
         WHERE order_id = ? ORDER BY history_id`, [orderId]);
     return rows.map(row => normalizeLegacyClock(row, ['created_at']));
 };
+
+// History is also the cancellation record for baseline 005 orders, which do
+// not have the newer lifecycle columns. Keep customer reasons out of the
+// Admin rejection field and expose the same shape for both schemas.
+exports.withCancellation = (order, events) => {
+    if (order.status !== 'Đã hủy' || order.rejection_reason) return order;
+    const cancelled = events.find(event => event.action === 'cancel' && event.to_status === 'Đã hủy');
+    if (!cancelled) return order;
+    return { ...order, cancellation_reason_code: 'customer_cancelled',
+        cancellation_reason: cancelled.reason, cancelled_at: order.cancelled_at || cancelled.created_at };
+};

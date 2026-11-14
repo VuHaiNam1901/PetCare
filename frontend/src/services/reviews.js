@@ -52,3 +52,41 @@ export function getMyReviews(token, { page = 1, limit = 100, signal } = {}) {
 export function createProductReview(token, productId, { rating, comment }) {
   return reviewRequest(token, `/api/products/${productId}/reviews`, { method: 'POST', body: { rating, comment } });
 }
+
+const positiveInteger = value => /^[1-9]\d*$/.test(String(value)) && Number(value) <= 2147483647;
+const count = value => Number.isSafeInteger(value) && value >= 0;
+
+// Public reads do not use the authenticated review-submission flow.
+export async function getProductReviews(productId, { page = 1, limit = 10, rating = '', signal } = {}) {
+  if (!positiveInteger(productId) || !positiveInteger(page) || !positiveInteger(limit) || Number(limit) > 100 ||
+    !Number.isSafeInteger((Number(page) - 1) * Number(limit)) || (rating !== '' && !/^[1-5]$/.test(String(rating)))) {
+    throw Object.assign(new Error('Thông số trang hoặc bộ lọc đánh giá không hợp lệ.'), { status: 400 });
+  }
+  const params = new URLSearchParams({ page: String(page), limit: String(limit) });
+  if (rating !== '') params.set('rating', String(rating));
+  let data;
+  try {
+    data = await commerceApi(`/api/products/${productId}/reviews?${params}`, { signal });
+  } catch (error) {
+    if (signal?.aborted) throw error;
+    const message = error.status === 404 ? 'Không tìm thấy sản phẩm.'
+      : error.status === 400 ? 'Thông số trang hoặc bộ lọc đánh giá không hợp lệ.'
+        : 'Chưa tải được đánh giá. Vui lòng kiểm tra kết nối và thử lại.';
+    throw Object.assign(new Error(message), { status: error.status });
+  }
+  const summary = data?.summary;
+  const distribution = summary?.distribution;
+  const validSummary = count(summary?.total) && distribution && [1, 2, 3, 4, 5].every(star => count(distribution[star])) &&
+    [1, 2, 3, 4, 5].reduce((sum, star) => sum + distribution[star], 0) === summary.total &&
+    (summary.total === 0 ? summary.average_rating === null : typeof summary.average_rating === 'number' && Number.isFinite(summary.average_rating) && summary.average_rating >= 1 && summary.average_rating <= 5);
+  const validReviews = Array.isArray(data?.reviews) && data.reviews.length <= Number(limit) && data.reviews.every(review =>
+    positiveInteger(review.review_id) && Number.isInteger(review.rating) && review.rating >= 1 && review.rating <= 5 &&
+    (review.comment === null || typeof review.comment === 'string') && (review.reviewer_name === null || typeof review.reviewer_name === 'string') &&
+    (review.created_at === null || typeof review.created_at === 'string') && (rating === '' || review.rating === Number(rating)));
+  if (data?.success !== true || Number(data.product?.product_id) !== Number(productId) || typeof data.product?.name !== 'string' ||
+    data.page !== Number(page) || data.limit !== Number(limit) || !count(data.total) || !validSummary || !validReviews ||
+    data.total !== (rating === '' ? summary.total : distribution[rating])) {
+    throw new Error('Dữ liệu đánh giá chưa đầy đủ. Vui lòng tải lại hoặc thử lại sau.');
+  }
+  return data;
+}

@@ -16,17 +16,19 @@ function productId(req) {
     if (!Number.isInteger(id)) bad('Invalid product ID');
     return id;
 }
-function pagination(req) {
-    if (Object.keys(req.query).some(key => !['page', 'limit'].includes(key))) bad('Unsupported query parameters');
+function pagination(req, { forProduct = false } = {}) {
+    if (Object.keys(req.query).some(key => !(forProduct ? ['page', 'limit', 'rating'] : ['page', 'limit']).includes(key))) bad('Unsupported query parameters');
     const page = positive(req.query.page, 1);
-    const limit = positive(req.query.limit, 20);
-    if (!Number.isInteger(page) || !Number.isInteger(limit) || limit > 100) bad('Invalid pagination');
+    const limit = positive(req.query.limit, forProduct ? 10 : 20);
+    if (!Number.isInteger(page) || !Number.isInteger(limit) || limit > 100 || !Number.isSafeInteger((page - 1) * limit)) bad('Invalid pagination');
     return { page, limit };
 }
 router.get('/products/:id/reviews', handle(async (req, res) => {
     const id = productId(req);
-    const { page, limit } = pagination(req);
-    res.json({ success: true, page, limit, ...await reviews.forProduct(id, page, limit) });
+    const { page, limit } = pagination(req, { forProduct: true });
+    const rating = req.query.rating === undefined ? undefined : positive(req.query.rating);
+    if (rating !== undefined && (!Number.isInteger(rating) || rating > 5)) bad('Rating must be an integer from 1 to 5');
+    res.json({ success: true, page, limit, ...await reviews.forProduct(id, page, limit, rating) });
 }));
 router.post('/products/:id/reviews', authenticate, authorize('user'), handle(async (req, res) => {
     const id = productId(req);

@@ -1,7 +1,7 @@
 const { createHash } = require('node:crypto');
 const pool = require('../config/db');
 const history = require('./order-history');
-const { decorate } = require('./order-policy');
+const { decorate, consistent, customerCanCancel, isV2 } = require('./order-policy');
 const workflow = require('../config/order-workflow');
 const clock = require('./order-time');
 
@@ -27,12 +27,78 @@ async function detail(db, userId, orderId) {
     const [items] = await db.execute(`SELECT d.order_detail_id, d.product_id, p.name, p.image_url,
         d.quantity, d.unit_price, d.subtotal FROM order_details d
         JOIN products p ON p.product_id = d.product_id WHERE d.order_id = ? ORDER BY d.order_detail_id`, [orderId]);
-    const order = publicOrder(decorate(clock.normalizeOrderClock(orders[0])));
+    const events = await history.read(db, orderId);
+    const order = publicOrder(decorate(history.withCancellation(clock.normalizeOrderClock(orders[0]), events)));
     if (order.workflow_version === workflow.VERSION) {
         order.refunds = await require('../services/online-orders').readRefunds(db, orderId);
     }
-    return { ...order, items, history: await history.read(db, orderId) };
+    return { ...order, items, history: events };
 }
+
+const cancellationReasons = Object.freeze({
+    changed_mind: 'Tôi không còn nhu cầu mua',
+    change_address: 'Tôi muốn thay đổi thông tin nhận hàng',
+    change_products: 'Tôi muốn thay đổi sản phẩm',
+    delivery_time: 'Thời gian giao hàng không phù hợp',
+    other: 'Lý do khác',
+});
+function cancellationReason(input) {
+    if (!input || typeof input !== 'object' || Array.isArray(input) ||
+        Object.keys(input).some(key => !['reason_code', 'reason'].includes(key)) ||
+        typeof input.reason_code !== 'string' || !Object.hasOwn(cancellationReasons, input.reason_code)) {
+        fail(400, 'Vui lòng chọn lý do hủy đơn hợp lệ.', 'INVALID_CANCELLATION');
+    }
+    if (input.reason_code !== 'other') {
+        if (input.reason !== undefined) fail(400, 'Chỉ nhập nội dung cho lý do khác.', 'INVALID_CANCELLATION');
+        return cancellationReasons[input.reason_code];
+    }
+    if (typeof input.reason !== 'string' || !input.reason.trim() || [...input.reason.trim()].length > 500 ||
+        /[\u0000-\u0009\u000B\u000C\u000E-\u001F\u007F]/.test(input.reason) || /[\uD800-\uDFFF]/u.test(input.reason)) {
+        fail(400, 'Vui lòng nhập lý do khác từ 1 đến 500 ký tự hợp lệ.', 'INVALID_CANCELLATION');
+    }
+    return input.reason.trim();
+}
+
+exports.cancel = async (userId, orderId, input) => {
+    const reason = cancellationReason(input);
+    const db = await pool.getConnection();
+    try {
+        await db.beginTransaction();
+        const [[user]] = await db.execute('SELECT role, status, full_name FROM `user` WHERE user_id = ? FOR SHARE', [userId]);
+        if (!user || user.role !== 'user' || user.status !== 'active') fail(403, 'Active user account required');
+        // Same order -> payment protocol as Admin, callbacks and expiry. The
+        // second request observes the committed cancellation/approval state.
+        const [[stored]] = await db.execute(`SELECT *${clock.selectOrderClock()} FROM orders WHERE order_id = ? AND user_id = ? FOR UPDATE`, [orderId, userId]);
+        if (!stored) fail(404, 'Order not found');
+        const order = clock.normalizeOrderClock(stored);
+        const [[payment]] = await db.execute(`SELECT *${clock.selectPaymentClock()} FROM payments WHERE order_id = ? FOR UPDATE`, [orderId]);
+        if (payment) clock.normalizeOrderClock(payment);
+        if (order.status === 'Đã hủy' || order.approved_at) fail(409, 'Chỉ được hủy đơn chưa được duyệt và chưa bị hủy.', 'ORDER_NOT_CANCELLABLE');
+        consistent(order, payment);
+        if (!customerCanCancel(order, payment)) fail(409, 'Đơn hàng không còn đủ điều kiện hủy.', 'ORDER_NOT_CANCELLABLE');
+        const online = require('../services/online-orders');
+        if (isV2(order)) {
+            await online.cancelLocked(db, order, payment, { reason, actorId: userId, actorName: user.full_name });
+        } else {
+            if (order.voucher_code_snapshot) await require('./voucher').releaseLocked(db, order);
+            await online.releaseStockLocked(db, order);
+            await db.execute("UPDATE orders SET status = 'Đã hủy' WHERE order_id = ?", [orderId]);
+            await db.execute("UPDATE payments SET payment_status = 'Đã hủy' WHERE order_id = ?", [orderId]);
+            await history.append(db, { orderId, fromStatus: order.status, toStatus: 'Đã hủy',
+                action: 'cancel', actorId: userId, actorName: user.full_name, reason });
+        }
+        const result = await detail(db, userId, orderId);
+        await db.commit();
+        return result;
+    } catch (error) {
+        try { await db.rollback(); } catch { /* Preserve the original failure. */ }
+        if (['ER_LOCK_DEADLOCK', 'ER_LOCK_WAIT_TIMEOUT'].includes(error.code)) {
+            error.status = 409; error.code = 'ORDER_RETRY'; error.retryable = true;
+            error.message = 'Đơn hàng đang được xử lý. Vui lòng cập nhật trạng thái rồi thử lại.';
+        }
+        throw error;
+    } finally { db.release(); }
+};
 
 exports.create = async (userId, input, key) => {
     // Keep the canonical legacy payload unchanged when no Voucher is supplied.

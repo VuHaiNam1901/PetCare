@@ -1,6 +1,6 @@
-import AdminVoucherNavLink from '../components/AdminVoucherNavLink.jsx';
+import { AdminSidebar } from '../components/AdminVoucherNavLink.jsx';
 import { useEffect, useRef, useState } from 'react';
-import { Check, ChevronLeft, ChevronRight, ClipboardList, FolderTree, Home, LockKeyhole, Package, RefreshCw, Search, ShieldCheck, UnlockKeyhole, Users, X } from 'lucide-react';
+import { Check, ChevronLeft, ChevronRight, LockKeyhole, RefreshCw, Search, ShieldCheck, UnlockKeyhole, X } from 'lucide-react';
 import { useCommerce } from '../context/CommerceContext.jsx';
 import { EmptyState, ErrorNotice } from '../components/Feedback.jsx';
 import { safeReturnUrl } from '../utils/auth-navigation.js';
@@ -157,7 +157,7 @@ export default function AdminUsersPage() {
   return <div className="container admin-orders-page admin-products-page admin-users-page">
     <div className="admin-orders-page-heading"><div><p className="admin-orders-eyebrow">PETCARESHOP ADMIN</p><h1>Quản lý người dùng</h1><p>Tra cứu và bật/tắt trạng thái tài khoản khách hàng.</p></div><span className="admin-orders-admin-label"><ShieldCheck size={17} aria-hidden="true" />Khu vực quản trị</span></div>
     {authLoading || !user ? <UsersLoading label="Đang kiểm tra quyền quản trị" /> : user.role !== 'admin' ? <section className="admin-orders-state"><ShieldCheck size={36} aria-hidden="true" /><h2>Bạn không có quyền quản trị</h2><p>Khu vực này chỉ dành cho tài khoản Admin.</p><a className="button button-outline" href="/">Về cửa hàng</a></section> : <div className="admin-orders-layout">
-      <aside className="admin-orders-sidebar" aria-label="Điều hướng quản trị"><div className="admin-orders-profile"><span><ShieldCheck size={24} aria-hidden="true" /></span><div><small>TÀI KHOẢN QUẢN TRỊ</small><strong>{user.full_name || user.email}</strong></div></div><nav><AdminVoucherNavLink /><a href="/admin/orders"><ClipboardList size={18} aria-hidden="true" />Quản lý đơn hàng<ChevronRight size={14} aria-hidden="true" /></a><a href="/admin/products"><Package size={18} aria-hidden="true" />Quản lý sản phẩm<ChevronRight size={14} aria-hidden="true" /></a><a href="/admin/categories"><FolderTree size={18} aria-hidden="true" />Quản lý danh mục<ChevronRight size={14} aria-hidden="true" /></a><a href="/admin/users" aria-current="page"><Users size={18} aria-hidden="true" />Quản lý người dùng<ChevronRight size={14} aria-hidden="true" /></a><a href="/"><Home size={18} aria-hidden="true" />Về cửa hàng</a></nav><p className="admin-orders-sidebar-note">Chỉ quản lý tài khoản khách hàng. Mỗi thay đổi trạng thái cần được xác nhận.</p></aside>
+      <AdminSidebar user={user} active="/admin/users" note="Chỉ quản lý tài khoản khách hàng. Mỗi thay đổi trạng thái cần được xác nhận." />
       <div className="admin-orders-content"><AdminUserList key={user.user_id} /></div>
     </div>}
   </div>;

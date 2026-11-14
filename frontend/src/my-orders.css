@@ -12,12 +12,15 @@
 .my-orders-profile > div { min-width: 0; }
 .my-orders-profile small { display: block; margin-bottom: 2px; font-size: 10px; color: var(--color-muted); }
 .my-orders-profile strong { display: block; font-size: 12px; overflow-wrap: anywhere; }
-.my-orders-account nav { display: flex; flex-direction: column; gap: 5px; padding: 12px 10px; }
-.my-orders-account nav a { display: flex; align-items: center; gap: 10px; padding: 12px 10px; border-radius: 5px; color: var(--color-muted); font-size: 11px; font-weight: 500; }
-.my-orders-account nav a[aria-current='page'] { color: var(--color-primary-hover); background: var(--color-section); font-weight: 600; }
-.my-orders-account nav a:hover { background: var(--color-page); }
-.my-orders-account nav a svg { flex-shrink: 0; }
+.my-orders-account nav { display: flex; flex-direction: column; gap: 6px; padding: 12px 10px; }
+.my-orders-account nav a, .my-orders-account nav .my-orders-account-logout { display: flex; align-items: center; gap: 10px; width: 100%; padding: 12px 12px; border: 0; border-radius: 6px; background: transparent; color: var(--color-muted); font-size: 12px; font-weight: 500; text-align: left; transition: background .15s, color .15s; }
+.my-orders-account nav a[aria-current='page'] { color: var(--color-primary-hover); background: var(--color-section); box-shadow: inset 3px 0 0 var(--color-primary); font-weight: 600; }
+.my-orders-account nav a:hover:not([aria-current='page']) { background: var(--color-page); color: var(--color-text); }
+.my-orders-account nav a svg, .my-orders-account nav .my-orders-account-logout svg { flex-shrink: 0; }
 .my-orders-account nav a svg:last-child:not(:first-child) { margin-left: auto; }
+.my-orders-account nav .my-orders-account-logout { color: #B43E28; }
+.my-orders-account nav .my-orders-account-logout:hover:not(:disabled) { background: #FFF3EE; color: #962D1A; }
+.my-orders-account nav .my-orders-account-logout:disabled { opacity: .5; cursor: not-allowed; }
 .my-orders-account-note { padding: 23px 22px 25px; margin-top: 8px; color: var(--color-muted); background: #F4FAFF; text-align: center; }
 .my-orders-account-note svg { color: var(--color-primary-hover); }
 .my-orders-account-note p { margin-top: 8px; font-size: 10px; line-height: 1.9; }
@@ -81,7 +84,9 @@
 .my-orders-skeleton .skeleton-line { height: 14px; }
 @media (max-width: 940px) {
   .my-orders-layout { grid-template-columns: minmax(0, 1fr); gap: 18px; }
-  .my-orders-account { display: none; }
+  .my-orders-account nav { flex-direction: row; flex-wrap: wrap; gap: 6px; }
+  .my-orders-account nav a, .my-orders-account nav .my-orders-account-logout { flex: 1 1 150px; width: auto; }
+  .my-orders-account-note { display: none; }
 }
 @media (max-width: 620px) {
   .container.my-orders-page { padding: 0 16px 36px; }

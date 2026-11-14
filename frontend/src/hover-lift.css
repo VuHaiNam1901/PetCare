@@ -1,0 +1,75 @@
+/* Shared by storefront and Admin controls; leave existing transform animations intact. */
+@media (hover: hover) and (pointer: fine) and (prefers-reduced-motion: no-preference) {
+  :is(
+    button,
+    a.button[href],
+    .header-action[href],
+    .account-menu-item[href],
+    .product-card:has(a[href]),
+    .pet-type-choice[href],
+    .checkout-payment-option:has(input:enabled),
+    .online-payment-choice:has(input:enabled),
+    .admin-products-pet-choice:has(input:enabled),
+    .admin-orders-cash-confirm:has(input:enabled),
+    .product-review-stars > label:has(input:enabled)
+  ):not(
+    :disabled,
+    [aria-disabled='true'],
+    [aria-disabled='true'] *,
+    [inert],
+    [inert] *,
+    .is-removing,
+    .is-removing *,
+    .chatbot-toggle,
+    .contact-button,
+    .header-search *,
+    .admin-orders-search *,
+    .quantity-control *
+  ) {
+    --hover-lift-duration: .22s;
+    --hover-lift-offset: -2px;
+    --hover-lift-shadow: 0 5px 14px rgba(23, 50, 77, .12);
+    /* Tint the existing background without replacing primary, danger or selected colors. */
+    --hover-lift-tint: inset 0 0 0 100vmax color-mix(in srgb, var(--color-primary) 4%, transparent);
+    transition:
+      translate var(--hover-lift-duration) ease,
+      box-shadow var(--hover-lift-duration) ease,
+      background-color var(--hover-lift-duration) ease,
+      border-color var(--hover-lift-duration) ease,
+      color var(--hover-lift-duration) ease;
+
+    &:hover {
+      translate: 0 var(--hover-lift-offset);
+      box-shadow: var(--hover-lift-shadow), var(--hover-lift-tint);
+    }
+
+    &:is(.product-card, .pet-type-card, .category-tile) {
+      --hover-lift-offset: -4px;
+      --hover-lift-shadow: 0 10px 24px rgba(23, 50, 77, .12);
+      --hover-lift-tint: inset 0 0 0 0 transparent;
+    }
+
+    &:is(
+      .product-card,
+      .category-tile,
+      .pet-type-choice,
+      .filter-pill,
+      .checkout-payment-option,
+      .online-payment-choice,
+      .admin-products-pet-choice,
+      .admin-orders-cash-confirm,
+      .product-review-stars > label
+    ):hover {
+      border-color: var(--color-primary);
+    }
+
+    &.pet-type-choice.is-selected {
+      --hover-lift-tint: inset 0 0 0 1px var(--color-primary);
+    }
+  }
+
+  /* Preserve the contact buttons' existing scale while gating their lift as well. */
+  .contact-button:not(:disabled, [aria-disabled='true'], [inert], [inert] *):is(:hover, :focus-visible) {
+    transform: translateY(-2px) scale(1.05);
+  }
+}

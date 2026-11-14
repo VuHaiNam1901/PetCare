@@ -21,6 +21,9 @@ const messages = {
   'Invalid category filter': 'Danh mục lọc không hợp lệ. Vui lòng chọn lại.',
   'Invalid status filter': 'Trạng thái lọc không hợp lệ. Vui lòng chọn lại.',
   'min_price exceeds max_price': 'Giá tối thiểu không được lớn hơn giá tối đa.',
+  'Invalid pet_type_ids': 'Vui lòng chọn các loài thú cưng hợp lệ, không trùng nhau.',
+  'Pet type does not exist': 'Loài thú cưng đã thay đổi. Vui lòng tải lại danh sách và chọn lại.',
+  'Unknown pet type': 'Loài thú cưng đã thay đổi. Vui lòng tải lại danh sách và chọn lại.',
 };
 
 async function adminProductsRequest(token, path, options = {}) {
@@ -32,6 +35,7 @@ async function adminProductsRequest(token, path, options = {}) {
   } catch (error) {
     if (options.signal?.aborted) throw error;
     if (error.status === 403) error.message = 'Bạn không có quyền quản lý sản phẩm. Vui lòng dùng tài khoản Admin đang hoạt động.';
+    else if (error.code === 'PET_TYPES_NOT_READY') error.message = 'Phân loại thú cưng chưa sẵn sàng. Vui lòng hoàn tất migration trước khi lưu lựa chọn loài.';
     else if (messages[error.message]) error.message = messages[error.message];
     throw error;
   }
@@ -50,6 +54,10 @@ export function getAdminProducts(token, {
 
 export function getAdminProductCategories(token, { signal } = {}) {
   return adminProductsRequest(token, '/api/admin/categories', { signal });
+}
+
+export function getAdminPetTypes(token, { signal } = {}) {
+  return adminProductsRequest(token, '/api/admin/pet-types', { signal });
 }
 
 export function createAdminProduct(token, body, { signal } = {}) {

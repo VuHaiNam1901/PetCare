@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
-import { Ban, Check, ChevronLeft, ChevronRight, ClipboardList, Eye, FolderTree, Home, Package, Pencil, Plus, RefreshCw, Search, ShieldCheck, Ticket, Users, X } from 'lucide-react';
+import { Ban, Check, ChevronLeft, ChevronRight, Eye, Pencil, Plus, RefreshCw, Search, ShieldCheck, Ticket, X } from 'lucide-react';
 import { useCommerce } from '../context/CommerceContext.jsx';
 import { useVoucherReadiness } from '../hooks/useVoucherReadiness.js';
-import AdminVoucherNavLink from '../components/AdminVoucherNavLink.jsx';
+import { AdminSidebar } from '../components/AdminVoucherNavLink.jsx';
 import { EmptyState, ErrorNotice } from '../components/Feedback.jsx';
 import { safeReturnUrl } from '../utils/auth-navigation.js';
 import { BRAND_NAME } from '../config/branding.js';
@@ -264,7 +264,7 @@ export default function AdminVouchersPage() {
   return <div className="container admin-orders-page admin-products-page admin-vouchers-page">
     <div className="admin-orders-page-heading"><div><p className="admin-orders-eyebrow">PETCARESHOP ADMIN</p><h1>Quản lý Voucher</h1><p>Tạo và quản lý mã ưu đãi dành cho khách hàng.</p></div><span className="admin-orders-admin-label"><ShieldCheck size={17} aria-hidden="true" />Khu vực quản trị</span></div>
     {authLoading || !user ? <Loading label="Đang kiểm tra quyền quản trị" /> : user.role !== 'admin' ? <section className="admin-orders-state"><ShieldCheck size={36} aria-hidden="true" /><h2>Bạn không có quyền quản trị</h2><p>Khu vực này chỉ dành cho tài khoản Admin.</p><a className="button button-outline" href="/">Về cửa hàng</a></section> : <div className="admin-orders-layout">
-      <aside className="admin-orders-sidebar" aria-label="Điều hướng quản trị"><div className="admin-orders-profile"><span><ShieldCheck size={24} aria-hidden="true" /></span><div><small>TÀI KHOẢN QUẢN TRỊ</small><strong>{user.full_name || user.email}</strong></div></div><nav><a href="/admin/orders"><ClipboardList size={18} aria-hidden="true" />Quản lý đơn hàng<ChevronRight size={14} aria-hidden="true" /></a><a href="/admin/products"><Package size={18} aria-hidden="true" />Quản lý sản phẩm<ChevronRight size={14} aria-hidden="true" /></a><a href="/admin/categories"><FolderTree size={18} aria-hidden="true" />Quản lý danh mục<ChevronRight size={14} aria-hidden="true" /></a><a href="/admin/users"><Users size={18} aria-hidden="true" />Quản lý người dùng<ChevronRight size={14} aria-hidden="true" /></a><AdminVoucherNavLink /><a href="/"><Home size={18} aria-hidden="true" />Về cửa hàng</a></nav><p className="admin-orders-sidebar-note">Voucher đã được dùng luôn được giữ lại cùng lịch sử đơn hàng.</p></aside>
+      <AdminSidebar user={user} active="/admin/vouchers" note="Voucher đã được dùng luôn được giữ lại cùng lịch sử đơn hàng." />
       <div className="admin-orders-content"><VoucherWorkspace key={user.user_id} /></div>
     </div>}
   </div>;

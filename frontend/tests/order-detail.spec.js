@@ -558,3 +558,122 @@ test('đơn áp dụng Voucher hiển thị Tạm tính, mã giảm giá, phần
   await expect(page.locator('.my-order-card[data-order-id="801"]')).toContainText('788.214,75');
   expectNoOrderMutations(account);
 });
+
+test('hủy đơn: chọn lý do khác, chống gửi trùng và cập nhật chi tiết sau khi xác nhận', async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 900 });
+  const order = populatedOrder({ can_cancel: true });
+  const eligibility = { can_cancel: true };
+  await mockMyOrders(page, { orders: [order], paymentOverrides: { 801: eligibility } });
+  const requests = [];
+  let release;
+  const gate = new Promise(resolve => { release = resolve; });
+  await page.route(`${API}/api/orders/801/cancel`, async route => {
+    if (route.request().method() === 'OPTIONS') return route.fulfill({ status: 204, headers: { 'access-control-allow-origin': '*', 'access-control-allow-methods': 'POST,OPTIONS', 'access-control-allow-headers': 'Authorization,Content-Type' } });
+    requests.push({ body: route.request().postDataJSON(), token: route.request().headers().authorization });
+    await gate;
+    Object.assign(order, { status: 'Đã hủy', payment_status: 'Đã hủy', can_cancel: false, cancellation_reason_code: 'customer_cancelled', cancellation_reason: 'Tôi cần đổi lịch nhận hàng.', cancelled_at: '2026-11-12T09:30:00.000Z' });
+    eligibility.can_cancel = false;
+    return route.fulfill({ headers: { 'access-control-allow-origin': '*' }, json: { success: true, order } });
+  });
+  await page.goto('/my-orders/801');
+  const button = page.getByRole('button', { name: 'Hủy đơn hàng', exact: true });
+  await button.click();
+  let dialog = page.getByRole('dialog', { name: 'Hủy đơn hàng #801?' });
+  await expect(dialog.getByLabel('Lý do hủy đơn')).toBeFocused();
+  await page.keyboard.press('Escape');
+  await expect(dialog).toHaveCount(0);
+  await expect(button).toBeFocused();
+  expect(requests).toEqual([]);
+  await button.click();
+  dialog = page.getByRole('dialog');
+  await dialog.getByLabel('Lý do hủy đơn').selectOption('other');
+  const confirm = dialog.getByRole('button', { name: 'Xác nhận hủy đơn', exact: true });
+  await expect(confirm).toBeDisabled();
+  await dialog.getByLabel('Nhập lý do khác').fill('   ');
+  await expect(confirm).toBeDisabled();
+  await dialog.getByLabel('Nhập lý do khác').fill(' Tôi cần đổi lịch nhận hàng. ');
+  expect(await dialog.evaluate(node => node.getBoundingClientRect().right <= innerWidth && document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await confirm.click();
+  await expect(dialog.getByRole('button', { name: 'Đang hủy đơn...' })).toBeDisabled();
+  await expect(dialog.getByRole('button', { name: 'Giữ đơn hàng' })).toBeDisabled();
+  await page.keyboard.press('Escape');
+  await expect(dialog).toBeVisible();
+  expect(requests).toEqual([{ body: { reason_code: 'other', reason: 'Tôi cần đổi lịch nhận hàng.' }, token: `Bearer ${tokenFor('a')}` }]);
+  release();
+  await expect(dialog).toHaveCount(0);
+  await expect(page.locator('.order-detail-status')).toHaveText('Đã hủy');
+  await expect(page.locator('.order-cancel-success')).toHaveText('Đã hủy đơn hàng thành công.');
+  await expect(page.locator('.order-detail-rejection')).toContainText('Tôi cần đổi lịch nhận hàng.');
+  await expect(button).toHaveCount(0);
+  expect(requests).toHaveLength(1);
+});
+
+test('hủy đơn: dùng quyền mới nhất từ thông tin thanh toán', async ({ page }) => {
+  const account = await mockMyOrders(page, { orders: [populatedOrder({ can_cancel: true })], paymentOverrides: { 801: { can_cancel: false, approved_at: '2026-11-12T09:30:00.000Z', order_status: 'Chờ giao hàng' } } });
+  let release;
+  const gate = new Promise(resolve => { release = resolve; });
+  await page.route(`${API}/api/orders/801/payment`, async route => {
+    if (route.request().method() === 'GET') await gate;
+    return route.fallback();
+  });
+  await page.goto('/my-orders/801');
+  await page.getByRole('button', { name: 'Hủy đơn hàng', exact: true }).click();
+  const dialog = page.getByRole('dialog');
+  await dialog.getByLabel('Lý do hủy đơn').selectOption('changed_mind');
+  release();
+  await expect(page.locator('.order-detail-status')).toHaveText('Chờ giao hàng');
+  await expect(dialog.getByRole('alert')).toContainText('không đủ điều kiện hủy');
+  await expect(dialog.getByRole('button', { name: 'Xác nhận hủy đơn' })).toBeDisabled();
+  await dialog.getByRole('button', { name: 'Giữ đơn hàng' }).click();
+  await expect(page.getByRole('button', { name: 'Hủy đơn hàng', exact: true })).toHaveCount(0);
+  expectNoOrderMutations(account);
+});
+
+test('hủy đơn: xung đột với duyệt đơn yêu cầu cập nhật rồi ẩn quyền hủy', async ({ page }) => {
+  const order = populatedOrder({ can_cancel: true });
+  const eligibility = { can_cancel: true };
+  await mockMyOrders(page, { orders: [order], paymentOverrides: { 801: eligibility } });
+  const requests = [];
+  await page.route(`${API}/api/orders/801/cancel`, async route => {
+    if (route.request().method() === 'OPTIONS') return route.fulfill({ status: 204, headers: { 'access-control-allow-origin': '*', 'access-control-allow-methods': 'POST,OPTIONS', 'access-control-allow-headers': 'Authorization,Content-Type' } });
+    requests.push(route.request().postDataJSON());
+    Object.assign(order, { can_cancel: false, approved_at: '2026-11-12T09:30:00.000Z', status: 'Chờ giao hàng' });
+    eligibility.can_cancel = false;
+    return route.fulfill({ status: 409, headers: { 'access-control-allow-origin': '*' }, json: { success: false, message: 'Đơn hàng đã được cửa hàng duyệt.' } });
+  });
+  await page.goto('/my-orders/801');
+  await page.getByRole('button', { name: 'Hủy đơn hàng', exact: true }).click();
+  const dialog = page.getByRole('dialog');
+  await dialog.getByLabel('Lý do hủy đơn').selectOption('changed_mind');
+  await dialog.getByRole('button', { name: 'Xác nhận hủy đơn' }).click();
+  await expect(dialog.getByRole('alert')).toContainText('Đơn hàng đã được cửa hàng duyệt.');
+  await expect(dialog.getByRole('button', { name: 'Xác nhận hủy đơn' })).toBeDisabled();
+  await dialog.getByRole('button', { name: 'Cập nhật đơn hàng' }).click();
+  await expect(page.locator('.order-detail-status')).toHaveText('Chờ giao hàng');
+  await expect(page.getByRole('button', { name: 'Hủy đơn hàng', exact: true })).toHaveCount(0);
+  await expect(page.locator('.order-cancel-success')).toHaveCount(0);
+  expect(requests).toEqual([{ reason_code: 'changed_mind' }]);
+});
+
+test('hủy đơn: Online đã thanh toán hiển thị yêu cầu hoàn tiền chờ xử lý', async ({ page }) => {
+  const order = populatedOrder({ workflow_version: 2, payment_method: 'ONLINE', status: 'Chờ xử lý', payment_status: 'Đã thanh toán', transaction_date: '2026-11-12T09:00:00.000Z', can_cancel: true });
+  const eligibility = { can_cancel: true };
+  await mockMyOrders(page, { orders: [order], paymentOverrides: { 801: eligibility } });
+  await page.route(`${API}/api/orders/801/cancel`, async route => {
+    if (route.request().method() === 'OPTIONS') return route.fulfill({ status: 204, headers: { 'access-control-allow-origin': '*', 'access-control-allow-methods': 'POST,OPTIONS', 'access-control-allow-headers': 'Authorization,Content-Type' } });
+    Object.assign(order, { status: 'Đã hủy', can_cancel: false, cancellation_reason_code: 'customer_cancelled', cancellation_reason: 'Tôi không còn nhu cầu mua', refunds: [{ refund_id: 9, amount: order.total_amount, currency: 'VND', status: 'requested', reason_code: 'customer_cancelled' }] });
+    eligibility.can_cancel = false;
+    return route.fulfill({ headers: { 'access-control-allow-origin': '*' }, json: { success: true, order } });
+  });
+  await page.goto('/my-orders/801');
+  await page.getByRole('button', { name: 'Hủy đơn hàng', exact: true }).click();
+  const dialog = page.getByRole('dialog');
+  await expect(dialog).toContainText('ghi nhận yêu cầu hoàn tiền');
+  await dialog.getByLabel('Lý do hủy đơn').selectOption('changed_mind');
+  await dialog.getByRole('button', { name: 'Xác nhận hủy đơn' }).click();
+  await expect(page.locator('.order-detail-status')).toHaveText('Đã hủy');
+  await expect(page.locator('.order-detail-payment-status')).toHaveText('Đã thanh toán');
+  await expect(page.locator('.order-detail-refund')).toContainText('Chờ xử lý hoàn tiền');
+  await expect(page.locator('.order-detail-refund')).toContainText('Bạn đã hủy đơn hàng sau khi thanh toán.');
+  await expect(page.locator('.order-detail-refund')).not.toContainText('Đã hoàn tiền');
+});

@@ -1,4 +1,25 @@
-import { CircleAlert, PawPrint, RefreshCw } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { CircleAlert, CircleCheck, PawPrint, RefreshCw, X } from 'lucide-react';
+
+export function FeatureNotice({ message, type = 'info', onClose }) {
+  const [retained, setRetained] = useState(null);
+  useEffect(() => {
+    if (message) { setRetained({ message, type }); return; }
+    const delay = window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : 180;
+    const timer = window.setTimeout(() => setRetained(null), delay);
+    return () => window.clearTimeout(timer);
+  }, [message, type]);
+
+  const notice = message ? { message, type } : retained;
+  if (!notice) return null;
+  const leaving = !message;
+  return <div className={`feature-notice${notice.type === 'success' ? ' feature-notice--success' : ''}${leaving ? ' is-leaving' : ''}`}
+    key={notice.message} role="status" aria-atomic="true" aria-hidden={leaving || undefined}>
+    {notice.type === 'success' && <CircleCheck className="feature-notice-icon" size={21} aria-hidden="true" />}
+    <p>{notice.message}</p>
+    <button className="icon-button" type="button" aria-label="Đóng thông báo" disabled={leaving} onClick={onClose}><X size={18} aria-hidden="true" /></button>
+  </div>;
+}
 
 export function ErrorNotice({ title, message, onRetry }) {
   return (

@@ -1,4 +1,5 @@
 const pool = require('../config/db');
+const { normalizeLegacyClock } = require('./order-time');
 const fail = (status, message) => { throw Object.assign(new Error(message), { status }); };
 // Legacy names/comments may contain markup. Responses are escaped plain text.
 const safeText = value => value == null ? value : value.replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
@@ -31,25 +32,41 @@ exports.create = async (userId, productId, input) => {
     } finally { db.release(); }
 };
 
-async function list(userId, productId, page, limit) {
+async function list(userId, productId, page, limit, rating) {
     const db = await pool.getConnection();
     try {
-        await db.beginTransaction();
+        let product, summary;
         if (productId !== null) {
-            const [products] = await db.execute('SELECT product_id FROM products WHERE product_id = ?', [productId]);
-            if (!products.length) fail(404, 'Product not found');
-        }
-        const where = productId !== null ? 'r.product_id = ?' : 'r.user_id = ?';
+            // These settings apply to this read transaction only, so product,
+            // summary, filtered count and page always describe one snapshot.
+            await db.query('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ');
+            await db.query('START TRANSACTION READ ONLY');
+            [[product]] = await db.execute('SELECT product_id, name FROM products WHERE product_id = ?', [productId]);
+            if (!product) fail(404, 'Product not found');
+            const [[aggregate]] = await db.execute(`SELECT COUNT(*) AS total, AVG(rating) AS average_rating,
+                SUM(rating = 1) AS star_1, SUM(rating = 2) AS star_2, SUM(rating = 3) AS star_3,
+                SUM(rating = 4) AS star_4, SUM(rating = 5) AS star_5
+                FROM reviews WHERE product_id = ?`, [productId]);
+            summary = { total: Number(aggregate.total), average_rating: aggregate.average_rating === null ? null : Number(aggregate.average_rating),
+                distribution: Object.fromEntries([1, 2, 3, 4, 5].map(star => [star, Number(aggregate[`star_${star}`] || 0)])) };
+        } else await db.beginTransaction();
+        let where = productId !== null ? 'r.product_id = ?' : 'r.user_id = ?';
         const params = [productId ?? userId];
-        const [[{ total }]] = await db.execute(`SELECT COUNT(*) AS total FROM reviews r WHERE ${where}`, params);
+        if (productId !== null && rating !== undefined) { where += ' AND r.rating = ?'; params.push(rating); }
+        let total = summary?.total;
+        if (total === undefined || rating !== undefined) {
+            const [[count]] = await db.execute(`SELECT COUNT(*) AS total FROM reviews r WHERE ${where}`, params);
+            total = Number(count.total);
+        }
         const fields = productId !== null ? 'u.full_name AS reviewer_name' : 'r.product_id, p.name AS product_name, p.image_url, p.status AS product_status';
+        const reviewClock = productId !== null ? ', UNIX_TIMESTAMP(r.created_at) AS __clock_created_at' : '';
         const join = productId !== null ? 'JOIN `user` u ON u.user_id = r.user_id' : 'JOIN products p ON p.product_id = r.product_id';
-        const [rows] = await db.query(`SELECT r.review_id, r.rating, r.comment, r.created_at, ${fields}
+        const [rows] = await db.query(`SELECT r.review_id, r.rating, r.comment, r.created_at${reviewClock}, ${fields}
             FROM reviews r ${join} WHERE ${where} ORDER BY r.created_at DESC, r.review_id DESC LIMIT ? OFFSET ?`, [...params, limit, (page - 1) * limit]);
         await db.commit();
-        return { total, reviews: rows.map(safe) };
+        return { total, reviews: rows.map(row => safe(productId !== null ? normalizeLegacyClock(row, ['created_at']) : row)), ...(product ? { product, summary } : {}) };
     } catch (error) { await db.rollback(); throw error; }
     finally { db.release(); }
 }
-exports.forProduct = (productId, page, limit) => list(null, productId, page, limit);
+exports.forProduct = (productId, page, limit, rating) => list(null, productId, page, limit, rating);
 exports.mine = (userId, page, limit) => list(userId, null, page, limit);

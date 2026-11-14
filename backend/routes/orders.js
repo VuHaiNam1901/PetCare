@@ -70,4 +70,9 @@ router.get('/:id', handle(async (req, res) => {
     if (Object.keys(req.query).length || !/^[1-9]\d*$/.test(req.params.id) || !id(Number(req.params.id))) bad('Invalid order ID or query');
     res.json({ success: true, order: await orders.get(req.user.user_id, Number(req.params.id)) });
 }));
+
+router.post('/:id/cancel', handle(async (req, res) => {
+    if (Object.keys(req.query).length || !/^[1-9]\d*$/.test(req.params.id) || !id(Number(req.params.id))) bad('Invalid order ID or query');
+    res.json({ success: true, order: await orders.cancel(req.user.user_id, Number(req.params.id), req.body) });
+}));
 module.exports = router;

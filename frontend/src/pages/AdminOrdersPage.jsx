@@ -1,11 +1,11 @@
-import AdminVoucherNavLink from '../components/AdminVoucherNavLink.jsx';
+import { AdminSidebar } from '../components/AdminVoucherNavLink.jsx';
 import { useEffect, useRef, useState } from 'react';
-import { ArrowLeft, ArrowRight, Check, ChevronLeft, ChevronRight, CircleAlert, ClipboardList, CreditCard, Home, Info, MapPin, Package, RefreshCw, Search, ShieldCheck, Truck, X } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Check, ChevronLeft, ChevronRight, CircleAlert, CreditCard, Info, MapPin, Package, RefreshCw, Search, ShieldCheck, Truck, X } from 'lucide-react';
 import { useCommerce } from '../context/CommerceContext.jsx';
 import { ErrorNotice } from '../components/Feedback.jsx';
 import { OrderHistory, OrderItems, OrderStatusBadge, OrdersLoading } from '../components/OrderContent.jsx';
 import { formatPrice } from '../utils/catalog.js';
-import { formatOrderDate } from '../utils/orders.js';
+import { formatOrderDate, formatOrderMoney, recordedDate } from '../utils/orders.js';
 import { safeReturnUrl } from '../utils/auth-navigation.js';
 import { BRAND_NAME } from '../config/branding.js';
 import '../my-orders.css';
@@ -18,6 +18,33 @@ const APPROVAL_FILTERS = ['pending', 'approved', 'rejected'];
 const positiveId = value => /^[1-9]\d*$/.test(String(value || '')) && Number(value) <= 2147483647;
 const paymentMethod = method => method === 'COD' ? 'Thanh toán khi nhận hàng (COD)' : method === 'ONLINE' ? 'Online' : 'Chưa có thông tin';
 const friendlyDate = value => formatOrderDate(value, true) || 'Chưa có thông tin';
+const REFUND_STATUSES = {
+  requested: 'Đã ghi nhận yêu cầu hoàn tiền',
+  submitted: 'Đã gửi yêu cầu hoàn tiền',
+  processing: 'Đang xử lý hoàn tiền',
+  succeeded: 'Đã hoàn tiền',
+  failed: 'Hoàn tiền chưa thành công',
+  unknown: 'Chưa xác định kết quả hoàn tiền',
+  manual_review: 'Cần kiểm tra hoàn tiền',
+};
+
+function RefundDetails({ refunds }) {
+  if (!Array.isArray(refunds) || !refunds.length) return null;
+  return <section className="admin-orders-card admin-orders-refunds" aria-labelledby="admin-refunds-title">
+    <h2 id="admin-refunds-title"><CreditCard size={20} aria-hidden="true" />Thông tin hoàn tiền</h2>
+    <ul role="list" aria-label="Danh sách yêu cầu hoàn tiền">
+      {refunds.map((refund, index) => <li key={refund.refund_id || index} data-refund-id={refund.refund_id}>
+        <strong>{REFUND_STATUSES[refund.status] || 'Đang cập nhật hoàn tiền'}</strong>
+        <p>{refund.currency && refund.currency !== 'VND' ? `${refund.amount} ${refund.currency}` : formatOrderMoney(refund.amount, true)}</p>
+        {refund.reason_code === 'customer_cancelled' && <p>Khách hàng hủy đơn trước khi được duyệt.</p>}
+        {refund.reason_code === 'admin_rejected' && <p>Đơn hàng bị Admin từ chối sau khi thanh toán.</p>}
+        {recordedDate(refund.requested_at_utc) && <p>Ghi nhận yêu cầu: <time dateTime={refund.requested_at_utc}>{friendlyDate(refund.requested_at_utc)}</time></p>}
+        {refund.status === 'succeeded' && recordedDate(refund.confirmed_at_utc) && <p>Hoàn tất hoàn tiền: <time dateTime={refund.confirmed_at_utc}>{friendlyDate(refund.confirmed_at_utc)}</time></p>}
+      </li>)}
+    </ul>
+    {refunds.some(refund => refund.status !== 'succeeded') && <p className="admin-orders-muted">Yêu cầu hoàn tiền chỉ hoàn tất khi có xác nhận từ cổng thanh toán. Trạng thái thanh toán vẫn giữ thông tin tiền đã thu để đối chiếu.</p>}
+  </section>;
+}
 
 function validOrder(order, expectedId) {
   return order && Number.isSafeInteger(order.order_id) && order.order_id > 0 &&
@@ -27,14 +54,6 @@ function validOrder(order, expectedId) {
 
 function AdminState({ title, children }) {
   return <section className="admin-orders-state"><ShieldCheck size={36} aria-hidden="true" /><h2>{title}</h2><p>{children}</p><a href="/" className="button button-outline">Về cửa hàng</a></section>;
-}
-
-function AdminSidebar({ user, detail }) {
-  return <aside className="admin-orders-sidebar" aria-label="Điều hướng quản trị">
-    <div className="admin-orders-profile"><span><ShieldCheck size={24} aria-hidden="true" /></span><div><small>TÀI KHOẢN QUẢN TRỊ</small><strong>{user.full_name || user.email}</strong></div></div>
-    <nav><AdminVoucherNavLink /><a href="/admin/orders" aria-current="page"><ClipboardList size={18} aria-hidden="true" />Quản lý đơn hàng<ChevronRight size={14} aria-hidden="true" /></a><a href="/"><Home size={18} aria-hidden="true" />Về cửa hàng</a></nav>
-    <p className="admin-orders-sidebar-note">{detail ? 'Kiểm tra thông tin đơn và xác nhận trước mỗi thao tác.' : 'Duyệt đơn và theo dõi giao hàng từ dữ liệu thực tế.'}</p>
-  </aside>;
 }
 
 function AdminList({ userId }) {
@@ -223,9 +242,11 @@ function AdminDetail({ orderId, userId }) {
       <section className="admin-orders-card admin-orders-recipient"><h2><MapPin size={20} aria-hidden="true" />Thông tin nhận hàng</h2><dl className="admin-orders-data"><div><dt>Người nhận</dt><dd>{order.recipient_name || 'Chưa có thông tin'}</dd></div><div><dt>Số điện thoại</dt><dd>{order.phone || 'Chưa có thông tin'}</dd></div><div><dt>Địa chỉ</dt><dd className="admin-orders-multiline">{order.shipping_address || 'Chưa có thông tin'}</dd></div><div><dt>Ghi chú</dt><dd className="admin-orders-multiline">{order.note || 'Không có ghi chú'}</dd></div></dl></section>
       <section className="admin-orders-card admin-orders-products"><h2><Package size={20} aria-hidden="true" />Sản phẩm đã đặt<span>{order.items.length} loại sản phẩm</span></h2><OrderItems orderId={order.order_id} items={order.items} className="admin-orders-items" /></section>
       {order.rejection_reason && <section className="admin-orders-card admin-orders-rejection"><h2><CircleAlert size={20} aria-hidden="true" />Lý do từ chối</h2><p className="admin-orders-multiline">{order.rejection_reason}</p></section>}
+      {order.status === 'Đã hủy' && order.cancellation_reason_code === 'customer_cancelled' && <section className="admin-orders-card admin-orders-rejection admin-orders-cancellation" aria-labelledby="admin-cancellation-title"><h2 id="admin-cancellation-title"><CircleAlert size={20} aria-hidden="true" />Khách hàng đã hủy đơn</h2><dl className="admin-orders-data"><div><dt>Lý do hủy</dt><dd className="admin-orders-multiline">{order.cancellation_reason || 'Chưa có thông tin'}</dd></div>{recordedDate(order.cancelled_at) && <div><dt>Thời điểm hủy</dt><dd><time dateTime={order.cancelled_at}>{friendlyDate(order.cancelled_at)}</time></dd></div>}</dl></section>}
       <div className="admin-orders-history"><OrderHistory history={order.history || []} /></div>
     </div><aside className="admin-orders-detail-aside">
       <section className="admin-orders-card admin-orders-payment"><h2><CreditCard size={20} aria-hidden="true" />Thanh toán và tổng tiền</h2><dl className="admin-orders-data"><div><dt>Phương thức</dt><dd>{paymentMethod(order.payment_method)}</dd></div><div><dt>Trạng thái thanh toán</dt><dd className="admin-orders-payment-status">{order.payment_status || 'Chưa có thông tin'}</dd></div>{order.transaction_date && <div><dt>Ghi nhận thanh toán</dt><dd>{friendlyDate(order.transaction_date)}</dd></div>}<div><dt>Phí vận chuyển</dt><dd>Chưa tính</dd></div><div className="admin-orders-total"><dt>Tổng tiền hàng</dt><dd>{formatPrice(order.total_amount)}</dd></div></dl><p className="admin-orders-muted">Giá và số lượng được lưu tại thời điểm đặt. Tổng tiền chưa gồm phí vận chuyển.</p></section>
+      <RefundDetails refunds={order.refunds} />
       <section className="admin-orders-card admin-orders-actions"><h2><Truck size={20} aria-hidden="true" />Xử lý đơn hàng</h2>
         {pending && <p className="admin-orders-action-note"><Info size={16} aria-hidden="true" />Đơn đang chờ Admin duyệt trước khi xử lý tiếp.</p>}
         {order.payment_method === 'ONLINE' && order.approval_state === 'approved' && order.status === 'Chờ thanh toán' && <p className="admin-orders-action-note"><Info size={16} aria-hidden="true" />Đơn đã duyệt, đang chờ hệ thống xác nhận thanh toán. Chỉ khi thanh toán thành công mới được giao hàng. Chưa có thao tác thanh toán trên trang Admin.</p>}
@@ -257,6 +278,6 @@ export default function AdminOrdersPage({ orderId }) {
   }, [authLoading, user?.user_id]);
 
   return <div className="container admin-orders-page"><div className="admin-orders-page-heading"><div><p className="admin-orders-eyebrow">PETCARESHOP ADMIN</p><h1>{detail ? 'Chi tiết đơn hàng' : 'Quản lý đơn hàng'}</h1><p>Duyệt đơn, theo dõi thanh toán và cập nhật giao hàng.</p></div><span className="admin-orders-admin-label"><ShieldCheck size={17} aria-hidden="true" />Khu vực quản trị</span></div>
-    {authLoading || !user ? <OrdersLoading label="Đang kiểm tra quyền quản trị" /> : user.role !== 'admin' ? <AdminState title="Bạn không có quyền quản trị">Khu vực này chỉ dành cho tài khoản Admin. Đơn hàng của bạn vẫn có tại trang Đơn hàng của tôi.</AdminState> : <div className="admin-orders-layout"><AdminSidebar user={user} detail={detail} /><div className="admin-orders-content">{detail ? <AdminDetail key={`${user.user_id}:${orderId}`} userId={user.user_id} orderId={orderId} /> : <AdminList key={user.user_id} userId={user.user_id} />}</div></div>}
+    {authLoading || !user ? <OrdersLoading label="Đang kiểm tra quyền quản trị" /> : user.role !== 'admin' ? <AdminState title="Bạn không có quyền quản trị">Khu vực này chỉ dành cho tài khoản Admin. Đơn hàng của bạn vẫn có tại trang Đơn hàng của tôi.</AdminState> : <div className="admin-orders-layout"><AdminSidebar user={user} active="/admin/orders" note={detail ? 'Kiểm tra thông tin đơn và xác nhận trước mỗi thao tác.' : 'Duyệt đơn và theo dõi giao hàng từ dữ liệu thực tế.'} /><div className="admin-orders-content">{detail ? <AdminDetail key={`${user.user_id}:${orderId}`} userId={user.user_id} orderId={orderId} /> : <AdminList key={user.user_id} userId={user.user_id} />}</div></div>}
   </div>;
 }

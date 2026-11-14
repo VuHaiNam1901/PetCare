@@ -1,0 +1,32 @@
+.wishlist-toggle { transition: color .18s ease, background .18s ease, border-color .18s ease; }
+.wishlist-toggle.is-favorite { color: #D84B70; border-color: #F0B7C7; background: #FFF1F5; }
+.wishlist-toggle:disabled { cursor: wait; opacity: .55; }
+.product-favorite.wishlist-toggle { width: 36px; height: 36px; border-radius: 50%; }
+.product-favorite.wishlist-toggle:hover:not(:disabled) { color: #C83B60; background: #FFF1F5; }
+.product-detail-page .detail-actions .button.detail-favorite { grid-column: 1 / -1; justify-self: start; width: auto; height: 36px; min-height: 36px; padding: 6px 12px; font-size: 13px; }
+.wishlist-page { min-height: 60vh; padding-bottom: 32px; }
+.wishlist-page .catalog-breadcrumbs { flex-wrap: wrap; }
+.wishlist-heading { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 18px; margin: 18px 0 26px; }
+.wishlist-heading h1 { display: flex; align-items: center; gap: 12px; max-width: none; font-size: 30px; }
+.wishlist-heading h1 > svg { color: #D84B70; flex-shrink: 0; }
+.wishlist-heading p { margin-top: 10px; color: var(--color-muted); font-size: 12px; }
+.wishlist-page .wishlist-count { color: var(--color-muted); font-size: 12px; margin-bottom: 15px; }
+.wishlist-product { min-width: 0; display: flex; }
+.wishlist-product > .product-card { width: 100%; }
+.wishlist-product.is-removing { pointer-events: none; animation: wishlist-product-leave .18s ease-in both; }
+.wishlist-state { padding: 34px 22px; border: 1px solid var(--color-border); border-radius: 8px; background: #fff; text-align: center; }
+.wishlist-state > svg { color: #D84B70; }
+.wishlist-state h2 { margin-top: 14px; font-size: 20px; }
+.wishlist-state p { margin: 10px auto 0; max-width: 540px; color: var(--color-muted); font-size: 12px; }
+.wishlist-state > a { margin-top: 18px; }
+.wishlist-page .error-notice { margin-bottom: 20px; }
+@keyframes wishlist-product-leave { to { opacity: 0; transform: scale(.96); } }
+@media (max-width: 620px) {
+  .wishlist-heading { margin-top: 12px; gap: 14px; }
+  .wishlist-heading h1 { gap: 9px; font-size: 25px; }
+  .wishlist-heading .button { padding: 9px 12px; font-size: 11px; }
+  .product-favorite.wishlist-toggle { width: 40px; height: 40px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .wishlist-product.is-removing { animation: none; opacity: 0; }
+}

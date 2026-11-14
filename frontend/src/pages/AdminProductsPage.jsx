@@ -1,6 +1,6 @@
-import AdminVoucherNavLink from '../components/AdminVoucherNavLink.jsx';
+import { AdminSidebar } from '../components/AdminVoucherNavLink.jsx';
 import { useEffect, useRef, useState } from 'react';
-import { Check, ChevronLeft, ChevronRight, ClipboardList, FolderTree, Home, Package, Pencil, Plus, RefreshCw, Search, ShieldCheck, Users, X } from 'lucide-react';
+import { Check, ChevronLeft, ChevronRight, Pencil, Plus, RefreshCw, Search, ShieldCheck, X } from 'lucide-react';
 import { useCommerce } from '../context/CommerceContext.jsx';
 import { EmptyState, ErrorNotice } from '../components/Feedback.jsx';
 import { ProductImage } from '../components/ProductCard.jsx';
@@ -15,6 +15,8 @@ const STATUSES = ['Đang bán', 'Ngừng bán'];
 const EMPTY_FILTERS = { q: '', category_id: '', status: '', min_price: '', max_price: '' };
 const PRICE = /^(?:0|[1-9]\d{0,9})(?:\.\d{1,2})?$/;
 const positiveId = value => Number.isSafeInteger(value) && value > 0 && value <= 2147483647;
+const validPetIds = ids => Array.isArray(ids) && ids.every(positiveId) && new Set(ids).size === ids.length;
+const petIds = product => [...(product?.pet_type_ids || [])].sort((a, b) => a - b);
 const canonicalPrice = value => {
   const [whole, fraction = ''] = String(value).trim().split('.');
   return `${whole}.${fraction.padEnd(2, '0')}`;
@@ -27,7 +29,8 @@ const validImagePath = value => value.length <= 500 && value.startsWith('/images
 const validProduct = product => product && positiveId(product.product_id) && positiveId(product.category_id) &&
   typeof product.name === 'string' && PRICE.test(String(product.price)) && Number.isInteger(product.stock_quantity) &&
   product.stock_quantity >= 0 && product.stock_quantity <= 2147483647 && STATUSES.includes(product.status) &&
-  typeof product.image_url === 'string' && (product.description == null || typeof product.description === 'string');
+  typeof product.image_url === 'string' && (product.description == null || typeof product.description === 'string') &&
+  (product.pet_type_ids === undefined || validPetIds(product.pet_type_ids));
 
 function productValues(product) {
   return { name: product?.name || '', category_id: String(product?.category_id || ''), description: product?.description || '',
@@ -86,11 +89,17 @@ function ProductDialog({ title, busy, onClose, children }) {
   </dialog>;
 }
 
-function ProductForm({ product, categories, busy, error, onSave, onClose }) {
+function ProductForm({ product, categories, petTypes, petTypesReady, onRetryPetTypes, busy, error, onSave, onClose }) {
   const [original] = useState(() => product ? productValues(product) : null);
   const [values, setValues] = useState(() => productValues(product));
   const [errors, setErrors] = useState({});
   const [formError, setFormError] = useState('');
+  const [selectedPets, setSelectedPets] = useState(() => petIds(product));
+  const petsReady = petTypes.ready && !petTypes.loading && !petTypes.error && (!product || (petTypesReady && Array.isArray(product.pet_type_ids)));
+  const togglePet = id => {
+    setSelectedPets(previous => previous.includes(id) ? previous.filter(value => value !== id) : [...previous, id].sort((a, b) => a - b));
+    setErrors(previous => ({ ...previous, pet_type_ids: '' })); setFormError('');
+  };
   const change = event => {
     const { name, value } = event.target;
     setValues(previous => ({ ...previous, [name]: value }));
@@ -103,9 +112,17 @@ function ProductForm({ product, categories, busy, error, onSave, onClose }) {
     event.preventDefault();
     if (busy) return;
     const { errors: nextErrors, payload } = prepareProduct(values, categories, original);
+    if (petsReady && (!product || JSON.stringify(selectedPets) !== JSON.stringify(petIds(product)))) {
+      if (!validPetIds(selectedPets) || selectedPets.some(id => !petTypes.items.some(pet => pet.pet_type_id === id))) nextErrors.pet_type_ids = 'Vui lòng chọn các loài trong danh sách hiện có.';
+      else payload.pet_type_ids = selectedPets;
+    }
     setErrors(nextErrors); setFormError('');
     const invalid = Object.keys(nextErrors)[0];
-    if (invalid) { event.currentTarget.elements.namedItem(invalid)?.focus(); return; }
+    if (invalid) {
+      if (invalid === 'pet_type_ids') event.currentTarget.querySelector('[name="pet_type_ids"]')?.focus();
+      else event.currentTarget.elements.namedItem(invalid)?.focus();
+      return;
+    }
     if (!Object.keys(payload).length) { setFormError('Bạn chưa thay đổi thông tin nào.'); return; }
     onSave(payload, product);
   };
@@ -121,6 +138,15 @@ function ProductForm({ product, categories, busy, error, onSave, onClose }) {
         <label className="admin-products-field admin-products-field-wide" htmlFor="admin-product-image_url"><span>Đường dẫn ảnh *</span><input {...field('image_url')} maxLength={500} required placeholder="/images/products/ten-san-pham.webp" /><small>Chọn đường dẫn ảnh đã có trong /images/products/. Hiện chưa hỗ trợ tải ảnh lên.</small>{fieldError('image_url')}</label>
         {validImagePath(imagePath) && <div className="admin-products-image-preview"><ProductImage key={imagePath} source={resolveImageUrl(imagePath)} name={`Ảnh xem trước: ${values.name.trim() || 'Sản phẩm'}`} width={96} height={96} /></div>}
         <label className="admin-products-field admin-products-field-wide" htmlFor="admin-product-description"><span>Mô tả</span><textarea {...field('description')} rows={5} maxLength={65535} />{fieldError('description')}</label>
+        <div className="admin-products-field-wide admin-products-pet-field">
+          <fieldset className="admin-products-pet-options" disabled={!petsReady} aria-describedby="admin-product-pet-help">
+            <legend>Loài thú cưng phù hợp</legend>
+            <div className="admin-products-pet-grid">{petTypes.items.map(pet => <label key={pet.pet_type_id} className="admin-products-pet-choice"><input type="checkbox" name="pet_type_ids" value={pet.pet_type_id} checked={selectedPets.includes(pet.pet_type_id)} onChange={() => togglePet(pet.pet_type_id)} /><span>{pet.name}</span></label>)}</div>
+          </fieldset>
+          <p id="admin-product-pet-help" className="admin-products-pet-help">{petTypes.loading ? 'Đang tải danh sách loài thú cưng...' : petTypes.error ? 'Chưa tải được loài thú cưng. Bạn vẫn có thể lưu thông tin sản phẩm khác.' : !petsReady ? 'Phân loại thú cưng chưa sẵn sàng. Có thể cập nhật sau khi migration được áp dụng và danh sách sản phẩm được tải lại.' : 'Có thể chọn nhiều loài hoặc để trống nếu chưa đủ thông tin xác định.'}</p>
+          {petTypes.error && <div className="admin-products-pet-retry"><p role="alert">{petTypes.error}</p><button className="text-link" type="button" disabled={busy} onClick={onRetryPetTypes}>Tải lại loài thú cưng</button></div>}
+          {fieldError('pet_type_ids')}
+        </div>
       </div></fieldset>
       {(formError || error) && <p className="admin-products-form-error" role="alert">{formError || error}</p>}
       <div className="admin-products-dialog-actions"><button type="button" className="button button-outline" disabled={busy} onClick={onClose}>Hủy</button><button type="submit" className="button button-primary" disabled={busy}>{busy ? 'Đang lưu...' : product ? 'Lưu thay đổi' : 'Thêm sản phẩm'}</button></div>
@@ -129,15 +155,17 @@ function ProductForm({ product, categories, busy, error, onSave, onClose }) {
 }
 
 function AdminProductCatalog() {
-  const { getAdminProducts, getAdminProductCategories, createAdminProduct, updateAdminProduct, stopAdminProduct } = useCommerce();
+  const { getAdminProducts, getAdminProductCategories, getAdminPetTypes, createAdminProduct, updateAdminProduct, stopAdminProduct } = useCommerce();
   const methods = useRef({});
-  methods.current = { getAdminProducts, getAdminProductCategories, createAdminProduct, updateAdminProduct, stopAdminProduct };
+  methods.current = { getAdminProducts, getAdminProductCategories, getAdminPetTypes, createAdminProduct, updateAdminProduct, stopAdminProduct };
   const [draft, setDraft] = useState({ ...EMPTY_FILTERS });
   const [query, setQuery] = useState({ ...EMPTY_FILTERS, page: 1 });
   const [filterError, setFilterError] = useState('');
   const [revision, setRevision] = useState(0);
   const [categoryRetry, setCategoryRetry] = useState(0);
   const [categories, setCategories] = useState({ loading: true, items: [], error: '' });
+  const [petTypeRetry, setPetTypeRetry] = useState(0);
+  const [petTypes, setPetTypes] = useState({ loading: true, ready: false, items: [], error: '' });
   const [result, setResult] = useState(null);
   const [dialog, setDialog] = useState(null);
   const [busy, setBusy] = useState(false);
@@ -151,6 +179,20 @@ function AdminProductCatalog() {
   const hasFilters = Object.keys(EMPTY_FILTERS).some(key => query[key] !== '');
 
   useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
+  useEffect(() => {
+    const controller = new AbortController();
+    let active = true;
+    setPetTypes({ loading: true, ready: false, items: [], error: '' });
+    methods.current.getAdminPetTypes({ signal: controller.signal }).then(data => {
+      if (!active) return;
+      if (typeof data.ready !== 'boolean' || !Array.isArray(data.pet_types) || data.pet_types.some(pet => !positiveId(pet.pet_type_id) || typeof pet.name !== 'string' || typeof pet.slug !== 'string') ||
+        new Set(data.pet_types.map(pet => pet.pet_type_id)).size !== data.pet_types.length || (data.ready && data.pet_types.length !== 6) || (!data.ready && data.pet_types.length)) throw new Error('Danh sách loài thú cưng chưa hợp lệ. Vui lòng thử lại.');
+      setPetTypes({ loading: false, ready: data.ready, items: data.pet_types, error: '' });
+    }).catch(error => {
+      if (active && !controller.signal.aborted && !error.obsolete && ![401, 403].includes(error.status)) setPetTypes({ loading: false, ready: false, items: [], error: error.message });
+    });
+    return () => { active = false; controller.abort(); };
+  }, [petTypeRetry]);
   useEffect(() => {
     const controller = new AbortController();
     let active = true;
@@ -173,14 +215,14 @@ function AdminProductCatalog() {
       if (!Array.isArray(data.products) || !data.products.every(validProduct) || !Number.isSafeInteger(data.total) || data.total < 0) throw new Error('Danh sách sản phẩm chưa hợp lệ. Vui lòng thử lại.');
       const lastPage = Math.max(1, Math.ceil(data.total / PAGE_SIZE));
       if (query.page > lastPage) { setQuery(previous => ({ ...previous, page: lastPage })); return; }
-      setResult({ query, revision, loading: false, products: data.products, total: data.total, error: '' });
+      setResult({ query, revision, loading: false, products: data.products, total: data.total, petTypesReady: data.pet_types_ready === true, error: '' });
     }).catch(error => {
       if (active && !controller.signal.aborted && !error.obsolete && ![401, 403].includes(error.status)) setResult({ query, revision, loading: false, products: [], total: 0, error: error.message });
     });
     return () => { active = false; controller.abort(); };
   }, [query, revision]);
 
-  const reload = () => { if (!busyRef.current) setRevision(value => value + 1); };
+  const reload = () => { if (!busyRef.current) { setRevision(value => value + 1); setPetTypeRetry(value => value + 1); } };
   const reset = () => { setDraft({ ...EMPTY_FILTERS }); setFilterError(''); setQuery({ ...EMPTY_FILTERS, page: 1 }); };
   const applyFilters = event => {
     event.preventDefault();
@@ -229,13 +271,13 @@ function AdminProductCatalog() {
     <div className="admin-products-list-heading"><p aria-live="polite">{loading ? 'Đang tải danh sách...' : current.error ? 'Chưa tải được danh sách' : `${current.total} sản phẩm${hasFilters ? ' phù hợp bộ lọc' : ''}`}</p><div className="admin-products-heading-actions"><button className="button button-outline" type="button" disabled={busy || loading} onClick={reload}><RefreshCw size={15} aria-hidden="true" />Tải lại</button><button className="button button-primary" type="button" disabled={busy || !canEdit} onClick={() => openDialog({ kind: 'form', product: null })}><Plus size={17} aria-hidden="true" />Thêm sản phẩm</button></div></div>
     {loading ? <ProductsLoading /> : current.error ? <ErrorNotice title="Chưa tải được sản phẩm" message={current.error} onRetry={reload} /> : !current.products.length ? <EmptyState title={hasFilters ? 'Chưa tìm thấy sản phẩm phù hợp' : 'Chưa có sản phẩm'} message={hasFilters ? 'Thử tên khác hoặc thay đổi bộ lọc.' : 'Thêm sản phẩm đầu tiên bằng nút Thêm sản phẩm.'} onReset={hasFilters ? reset : undefined} /> : <>
       <div className="admin-products-table-wrap"><table className="admin-products-table"><caption className="sr-only">Danh sách sản phẩm quản trị</caption><thead><tr><th scope="col">Sản phẩm</th><th scope="col">Danh mục</th><th scope="col">Giá bán</th><th scope="col">Tồn kho</th><th scope="col">Trạng thái</th><th scope="col">Thao tác</th></tr></thead><tbody>{current.products.map(product => <tr key={product.product_id}>
-        <td className="admin-products-product-cell" data-label="Sản phẩm"><div className="admin-products-thumbnail"><ProductImage key={product.image_url} source={resolveImageUrl(product.image_url)} name={product.name} width={60} height={60} /></div><div><strong>{product.name}</strong><small>#{product.product_id}</small></div></td>
+        <td className="admin-products-product-cell" data-label="Sản phẩm"><div className="admin-products-thumbnail"><ProductImage key={product.image_url} source={resolveImageUrl(product.image_url)} name={product.name} width={60} height={60} /></div><div><strong>{product.name}</strong><small>#{product.product_id}</small>{petTypes.ready && current.petTypesReady && <small>Thú cưng: {petTypes.items.filter(pet => product.pet_type_ids?.includes(pet.pet_type_id)).map(pet => pet.name).join(', ') || 'Chưa phân loại'}</small>}</div></td>
         <td data-label="Danh mục">{product.category_name || categories.items.find(category => category.category_id === product.category_id)?.name || 'Chưa có tên danh mục'}</td><td data-label="Giá bán">{formatPrice(product.price)}</td><td data-label="Tồn kho">{product.stock_quantity}</td><td data-label="Trạng thái"><span className={`admin-products-badge${product.status === 'Ngừng bán' ? ' is-stopped' : ''}`}>{product.status}</span></td>
-        <td data-label="Thao tác"><div className="admin-products-row-actions"><button className="button button-outline" type="button" disabled={busy || !canEdit} aria-label={`Sửa ${product.name}`} onClick={() => openDialog({ kind: 'form', product })}><Pencil size={14} aria-hidden="true" />Sửa</button><button className="button admin-orders-button-danger-outline" type="button" disabled={busy || product.status === 'Ngừng bán'} aria-label={`Ngừng bán ${product.name}`} onClick={() => openDialog({ kind: 'stop', product })}>{product.status === 'Ngừng bán' ? 'Đã ngừng bán' : 'Ngừng bán'}</button></div></td>
+        <td data-label="Thao tác"><div className="admin-products-row-actions"><button className="button button-outline" type="button" disabled={busy || !canEdit} aria-label={`Sửa ${product.name}`} onClick={() => openDialog({ kind: 'form', product, petTypesReady: current.petTypesReady })}><Pencil size={14} aria-hidden="true" />Sửa</button><button className="button admin-orders-button-danger-outline" type="button" disabled={busy || product.status === 'Ngừng bán'} aria-label={`Ngừng bán ${product.name}`} onClick={() => openDialog({ kind: 'stop', product })}>{product.status === 'Ngừng bán' ? 'Đã ngừng bán' : 'Ngừng bán'}</button></div></td>
       </tr>)}</tbody></table></div>
       <div className="admin-orders-pagination"><p>Trang {query.page} / {Math.max(1, Math.ceil(current.total / PAGE_SIZE))} · {current.products.length} / {current.total} sản phẩm</p><div><button className="button button-outline" type="button" disabled={busy || query.page <= 1} onClick={() => setQuery(previous => ({ ...previous, page: previous.page - 1 }))}><ChevronLeft size={16} aria-hidden="true" />Trang trước</button><button className="button button-outline" type="button" disabled={busy || query.page * PAGE_SIZE >= current.total} onClick={() => setQuery(previous => ({ ...previous, page: previous.page + 1 }))}>Trang sau<ChevronRight size={16} aria-hidden="true" /></button></div></div>
     </>}
-    {dialog?.kind === 'form' && <ProductForm key={dialog.product?.product_id || 'new'} product={dialog.product} categories={categories.items} busy={busy} error={actionError} onClose={closeDialog} onSave={(payload, product) => mutate('save', payload, product)} />}
+    {dialog?.kind === 'form' && <ProductForm key={dialog.product?.product_id || 'new'} product={dialog.product} categories={categories.items} petTypes={petTypes} petTypesReady={dialog.petTypesReady} onRetryPetTypes={() => setPetTypeRetry(value => value + 1)} busy={busy} error={actionError} onClose={closeDialog} onSave={(payload, product) => mutate('save', payload, product)} />}
     {dialog?.kind === 'stop' && <ProductDialog title="Ngừng bán sản phẩm" busy={busy} onClose={closeDialog}><div className="admin-products-stop-copy"><p>Ngừng bán <strong>{dialog.product.name}</strong> (#{dialog.product.product_id})?</p><p>Sản phẩm sẽ chuyển sang trạng thái Ngừng bán. Thông tin sản phẩm và các đơn hàng liên quan vẫn được giữ lại.</p></div>{actionError && <p className="admin-products-form-error" role="alert">{actionError}</p>}<div className="admin-products-dialog-actions"><button type="button" className="button button-outline" autoFocus disabled={busy} onClick={closeDialog}>Hủy</button><button type="button" className="button admin-orders-button-danger-outline" disabled={busy} onClick={() => mutate('stop', null, dialog.product)}>{busy ? 'Đang cập nhật...' : 'Xác nhận ngừng bán'}</button></div></ProductDialog>}
   </>;
 }
@@ -253,6 +295,6 @@ export default function AdminProductsPage() {
     window.location.replace(`/login?returnTo=${encodeURIComponent(returnTo)}`);
   }, [authLoading, user?.user_id]);
   return <div className="container admin-orders-page admin-products-page"><div className="admin-orders-page-heading"><div><p className="admin-orders-eyebrow">PETCARESHOP ADMIN</p><h1>Quản lý sản phẩm</h1><p>Quản lý thông tin, giá bán, tồn kho và trạng thái sản phẩm.</p></div><span className="admin-orders-admin-label"><ShieldCheck size={17} aria-hidden="true" />Khu vực quản trị</span></div>
-    {authLoading || !user ? <ProductsLoading label="Đang kiểm tra quyền quản trị" /> : user.role !== 'admin' ? <section className="admin-orders-state"><ShieldCheck size={36} aria-hidden="true" /><h2>Bạn không có quyền quản trị</h2><p>Khu vực này chỉ dành cho tài khoản Admin.</p><a className="button button-outline" href="/">Về cửa hàng</a></section> : <div className="admin-orders-layout"><aside className="admin-orders-sidebar" aria-label="Điều hướng quản trị"><div className="admin-orders-profile"><span><ShieldCheck size={24} aria-hidden="true" /></span><div><small>TÀI KHOẢN QUẢN TRỊ</small><strong>{user.full_name || user.email}</strong></div></div><nav><AdminVoucherNavLink /><a href="/admin/orders"><ClipboardList size={18} aria-hidden="true" />Quản lý đơn hàng<ChevronRight size={14} aria-hidden="true" /></a><a href="/admin/products" aria-current="page"><Package size={18} aria-hidden="true" />Quản lý sản phẩm<ChevronRight size={14} aria-hidden="true" /></a><a href="/admin/categories"><FolderTree size={18} aria-hidden="true" />Quản lý danh mục<ChevronRight size={14} aria-hidden="true" /></a><a href="/admin/users"><Users size={18} aria-hidden="true" />Quản lý người dùng<ChevronRight size={14} aria-hidden="true" /></a><a href="/"><Home size={18} aria-hidden="true" />Về cửa hàng</a></nav><p className="admin-orders-sidebar-note">Cập nhật thông tin và trạng thái để quản lý danh sách sản phẩm.</p></aside><div className="admin-orders-content"><AdminProductCatalog key={user.user_id} /></div></div>}
+    {authLoading || !user ? <ProductsLoading label="Đang kiểm tra quyền quản trị" /> : user.role !== 'admin' ? <section className="admin-orders-state"><ShieldCheck size={36} aria-hidden="true" /><h2>Bạn không có quyền quản trị</h2><p>Khu vực này chỉ dành cho tài khoản Admin.</p><a className="button button-outline" href="/">Về cửa hàng</a></section> : <div className="admin-orders-layout"><AdminSidebar user={user} active="/admin/products" note="Cập nhật thông tin và trạng thái để quản lý danh sách sản phẩm." /><div className="admin-orders-content"><AdminProductCatalog key={user.user_id} /></div></div>}
   </div>;
 }

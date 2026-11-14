@@ -26,7 +26,7 @@ export async function fetchCollection(endpoint, collectionKey, signal) {
   }
 
   const rows = body?.[collectionKey];
-  const idKey = collectionKey === 'products' ? 'product_id' : 'category_id';
+  const idKey = collectionKey === 'products' ? 'product_id' : collectionKey === 'pet_types' ? 'pet_type_id' : 'category_id';
   if (
     body?.success !== true ||
     !Array.isArray(rows) ||
