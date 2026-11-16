@@ -5,6 +5,31 @@ const fail = (status, message) => { throw Object.assign(new Error(message), { st
 const safeText = value => value == null ? value : value.replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
 const safe = row => ({ ...row, comment: safeText(row.comment), ...(Object.hasOwn(row, 'reviewer_name') ? { reviewer_name: safeText(row.reviewer_name) } : {}) });
 
+// Public rows and every summary use the same valid-star predicate. Author
+// account changes do not hide reviews that were accepted by the existing policy.
+const publicRating = 'r.rating IN (1,2,3,4,5)';
+async function productSummaries(db, ids) {
+    const [rows] = await db.execute(`SELECT product_id, COUNT(*) AS review_count,
+        ROUND(AVG(rating), 1) AS average_rating,
+        SUM(rating = 1) AS star_1, SUM(rating = 2) AS star_2, SUM(rating = 3) AS star_3,
+        SUM(rating = 4) AS star_4, SUM(rating = 5) AS star_5 FROM reviews r
+        WHERE r.product_id IN (${ids.map(() => '?').join(',')}) AND ${publicRating}
+        GROUP BY r.product_id`, ids);
+    return rows;
+}
+// One aggregate query per catalog page, using its existing read transaction.
+exports.attachProductSummaries = async (db, products) => {
+    if (!products.length) return products;
+    const ids = [...new Set(products.map(product => product.product_id))];
+    const rows = await productSummaries(db, ids);
+    const summaries = new Map(rows.map(row => [String(row.product_id), row]));
+    return products.map(product => {
+        const summary = summaries.get(String(product.product_id));
+        return { ...product, review_count: Number(summary?.review_count ?? 0),
+            average_rating: summary?.average_rating == null ? null : Number(summary.average_rating) };
+    });
+};
+
 exports.create = async (userId, productId, input) => {
     const db = await pool.getConnection();
     try {
@@ -43,14 +68,11 @@ async function list(userId, productId, page, limit, rating) {
             await db.query('START TRANSACTION READ ONLY');
             [[product]] = await db.execute('SELECT product_id, name FROM products WHERE product_id = ?', [productId]);
             if (!product) fail(404, 'Product not found');
-            const [[aggregate]] = await db.execute(`SELECT COUNT(*) AS total, AVG(rating) AS average_rating,
-                SUM(rating = 1) AS star_1, SUM(rating = 2) AS star_2, SUM(rating = 3) AS star_3,
-                SUM(rating = 4) AS star_4, SUM(rating = 5) AS star_5
-                FROM reviews WHERE product_id = ?`, [productId]);
-            summary = { total: Number(aggregate.total), average_rating: aggregate.average_rating === null ? null : Number(aggregate.average_rating),
+            const [aggregate = {}] = await productSummaries(db, [productId]);
+            summary = { total: Number(aggregate.review_count ?? 0), average_rating: aggregate.average_rating == null ? null : Number(aggregate.average_rating),
                 distribution: Object.fromEntries([1, 2, 3, 4, 5].map(star => [star, Number(aggregate[`star_${star}`] || 0)])) };
         } else await db.beginTransaction();
-        let where = productId !== null ? 'r.product_id = ?' : 'r.user_id = ?';
+        let where = productId !== null ? `r.product_id = ? AND ${publicRating}` : 'r.user_id = ?';
         const params = [productId ?? userId];
         if (productId !== null && rating !== undefined) { where += ' AND r.rating = ?'; params.push(rating); }
         let total = summary?.total;

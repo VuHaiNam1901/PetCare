@@ -27,10 +27,8 @@ export function orderStatusLabel(order) {
   if (order.approval_state === 'rejected' || (order.status === 'Đã hủy' && order.rejection_reason)) return 'Đã từ chối';
   if (order.approval_state === 'pending') return 'Chờ duyệt';
   if (!order.approval_state && !order.approved_at) {
-    if (order.workflow_version === 2) {
-      if (order.status === 'Chờ xử lý') return 'Chờ duyệt';
-    } else if ((order.payment_method === 'COD' && order.status === 'Chờ xử lý') ||
-      (order.payment_method === 'ONLINE' && order.status === 'Chờ thanh toán')) {
+    if ((order.workflow_version === 2 && order.status === 'Chờ xử lý' && order.payment_status === 'Đã thanh toán') ||
+      (order.payment_method === 'COD' && order.status === 'Chờ xử lý')) {
       return 'Chờ duyệt';
     }
   }

@@ -4,9 +4,11 @@ import { useCommerce } from '../context/CommerceContext.jsx';
 import { ErrorNotice } from '../components/Feedback.jsx';
 import { OrderHistory, OrderItems, OrderStatusBadge, OrdersLoading } from '../components/OrderContent.jsx';
 import OrderReviewLinks from '../components/OrderReviewLinks.jsx';
+import { getSePayQr, getSePayStatus, SePayPaymentDialog, SePayStatus } from '../components/SePayTestQr.jsx';
 import { formatOrderDate, formatOrderMoney, orderStatusLabel, recordedDate } from '../utils/orders.js';
 import { safeReturnUrl } from '../utils/auth-navigation.js';
 import { BRAND_NAME } from '../config/branding.js';
+import { useChatPageState } from '../context/ChatPageContext.jsx';
 import '../my-orders.css';
 import '../order-detail.css';
 
@@ -49,12 +51,13 @@ const cancellationReasons = [
   ['other', 'Lý do khác'],
 ];
 
-function CancelOrderDialog({ order, busy, error, onClose, onConfirm, onReload }) {
+function CancelOrderDialog({ order, busy, error, onClose, onConfirm, onReload, onValidityChange }) {
   const dialog = useRef(null);
   const [reasonCode, setReasonCode] = useState('');
   const [reason, setReason] = useState('');
   const reasonLength = Array.from(reason.trim()).length;
   const valid = Boolean(reasonCode) && (reasonCode !== 'other' || (reasonLength > 0 && reasonLength <= 500));
+  useEffect(() => { onValidityChange(valid); }, [valid, onValidityChange]);
   useEffect(() => {
     const node = dialog.current;
     const opener = document.activeElement;
@@ -86,9 +89,9 @@ function OrderProgress({ order }) {
   const cancelled = order.status === 'Đã hủy';
   const rejected = order.approval_state === 'rejected' || Boolean(order.rejection_reason);
   const expired = isV2 && order.cancellation_reason_code === 'payment_expired';
-  const stages = isV2
+  const stages = order.payment_method === 'ONLINE'
     ? ['Chờ thanh toán', 'Chờ duyệt', 'Chờ giao hàng', 'Đang giao hàng', 'Đã giao hàng']
-    : ['Chờ duyệt', ...(order.payment_method === 'ONLINE' ? ['Chờ thanh toán'] : []), 'Chờ giao hàng', 'Đang giao hàng', 'Đã giao hàng'];
+    : ['Chờ duyệt', 'Chờ giao hàng', 'Đang giao hàng', 'Đã giao hàng'];
   const currentStage = order.approval_state === 'legacy' ? null : orderStatusLabel(order);
   const activeIndex = currentStage ? stages.indexOf(currentStage) : -1;
   const hasRecordedTimes = (cancelled && Boolean(recordedDate(order.order_date))) ||
@@ -111,8 +114,10 @@ function OrderProgress({ order }) {
   </section>;
 }
 
-function PaymentDetails({ order, state, onRetry }) {
+function PaymentDetails({ order, state, onRetry, paymentOpen, onOpenPayment, onClosePayment }) {
   const payment = state?.value;
+  const sepayQr = getSePayQr(order, payment);
+  const sepayStatus = getSePayStatus(order, payment);
   const isV2 = order.workflow_version === 2;
   const method = order.payment_method === 'COD' ? 'Thanh toán khi nhận hàng (COD)' : order.payment_method === 'ONLINE' ? 'Thanh toán Online' : 'Chưa có thông tin';
   const cancelled = order.status === 'Đã hủy' || order.payment_status === 'Đã hủy';
@@ -132,21 +137,19 @@ function PaymentDetails({ order, state, onRetry }) {
       : 'Thanh toán đã được ghi nhận theo thông tin của đơn hàng.';
   } else if (order.payment_method === 'COD') {
     notice = 'Bạn thanh toán khi nhận hàng. Trạng thái thu tiền được cập nhật từ cửa hàng.';
+  } else if (sepayQr) {
+    notice = sepayQr.mode === 'live'
+      ? 'Vui lòng chuyển khoản đúng số tiền và nội dung của đơn hàng. Cập nhật trạng thái sau khi chuyển khoản để xem kết quả.'
+      : sepayQr.reconciliationOnly
+      ? 'Đơn Online đang dùng QR DEMO / TEST của SePay trong môi trường thử nghiệm. Chỉ đối chiếu giao dịch giả, chưa xác nhận thanh toán.'
+      : 'Đơn Online đang chờ Webhook hợp lệ từ SePay Test Mode. Việc mở hoặc tải QR không xác nhận thanh toán.';
+  } else if (sepayStatus) {
+    notice = sepayStatus.reviewRequired
+      ? 'Giao dịch cần cửa hàng kiểm tra và đối soát. Trạng thái thanh toán phản ánh dữ liệu đã được máy chủ ghi nhận.'
+      : sepayStatus.mode === 'test' ? 'SePay Test Mode chỉ xử lý giao dịch giả trong môi trường thử nghiệm. Vui lòng cập nhật trạng thái để xem kết quả mới nhất.'
+        : 'Vui lòng cập nhật trạng thái để xem kết quả thanh toán mới nhất.';
   } else if (order.payment_method === 'ONLINE' && payment) {
-    if (isV2) {
-      const failedPrefix = order.payment_status === 'Thất bại' ? 'Lần thanh toán gần nhất chưa thành công. ' : '';
-      if (payment.can_simulate === true && payment.simulation_only === true) {
-        notice = `${failedPrefix}Đơn Online được thanh toán trước khi Admin duyệt và có thể thanh toán mô phỏng trong môi trường kiểm thử. Giao diện thanh toán chưa được tích hợp.`;
-      } else {
-        notice = `${failedPrefix}Đơn Online được thanh toán trước khi Admin duyệt trong thời hạn quy định. Hiện cổng thanh toán trực tuyến và giao diện thanh toán chưa được tích hợp.`;
-      }
-    } else if (!payment.approved_at) {
-      notice = 'Đơn hàng cần được Admin duyệt trước khi thanh toán.';
-    } else if (payment.can_simulate === true && payment.simulation_only === true) {
-      notice = 'Đơn hàng đã được Admin duyệt và có thể thanh toán mô phỏng. Giao diện thanh toán chưa được tích hợp.';
-    } else {
-      notice = 'Đơn hàng hiện chưa thể thanh toán. Vui lòng cập nhật trạng thái hoặc liên hệ cửa hàng. Giao diện thanh toán chưa được tích hợp.';
-    }
+    notice = payment.payment_unavailable_reason || 'Thanh toán trực tuyến hiện chưa khả dụng. Vui lòng cập nhật trạng thái hoặc liên hệ cửa hàng.';
   }
   return <section className="order-detail-card order-detail-payment" aria-labelledby="order-payment-title">
     <div className="order-detail-section-heading"><CreditCard size={20} aria-hidden="true" /><h2 id="order-payment-title">Thông tin thanh toán</h2></div>
@@ -158,6 +161,11 @@ function PaymentDetails({ order, state, onRetry }) {
     </dl>
     {(!state || state.loading) && <p className="order-detail-payment-loading" role="status">Đang kiểm tra thông tin thanh toán...</p>}
     {state?.error ? <div className="order-detail-payment-error"><ErrorNotice title="Chưa kiểm tra được thanh toán" message={state.error} onRetry={onRetry} /></div> : notice && <div className="order-detail-payment-note" role="status"><Info size={16} aria-hidden="true" /><p>{notice}</p></div>}
+    {sepayQr && payment.can_pay === true && !state?.loading && !state?.error && <>
+      <button className="button button-primary" type="button" onClick={onOpenPayment}>Thanh toán ngay</button>
+      {paymentOpen && <SePayPaymentDialog key={`${sepayQr.mode}:${sepayQr.orderId}:${sepayQr.expiresAt}`} qr={sepayQr} onRefresh={onRetry} onClose={onClosePayment} />}
+    </>}
+    {sepayStatus && !sepayQr && !state?.loading && !state?.error && <SePayStatus status={sepayStatus} onRefresh={onRetry} />}
     {refunds.length > 0 && <div className="order-detail-refund-block">
       <h3 className="order-detail-subheading">Thông tin hoàn tiền</h3>
       <ul role="list" className="order-detail-refunds" aria-label="Danh sách yêu cầu hoàn tiền">
@@ -178,7 +186,6 @@ function PaymentDetails({ order, state, onRetry }) {
       </ul>
       {refunds.some(refund => refund.status !== 'succeeded') && <p className="order-detail-muted">Yêu cầu hoàn tiền chỉ hoàn tất khi cổng thanh toán xác nhận trạng thái Đã hoàn tiền.</p>}
     </div>}
-    {order.payment_method === 'ONLINE' && !cancelled && order.payment_status !== 'Đã thanh toán' && <p className="order-detail-muted">{isV2 ? 'Cổng thanh toán trực tuyến chưa được kết nối trên giao diện khách hàng. Xem đơn không thực hiện thanh toán.' : 'Thanh toán Online hiện chỉ có mô phỏng, chưa kết nối cổng thanh toán thật. Xem đơn không thực hiện thanh toán.'}</p>}
   </section>;
 }
 
@@ -190,9 +197,11 @@ export default function OrderDetailPage({ orderId }) {
   const id = validId ? Number(orderId) : null;
   const [retry, setRetry] = useState(0);
   const [paymentRetry, setPaymentRetry] = useState(0);
+  const [paymentOpen, setPaymentOpen] = useState(() => new URLSearchParams(window.location.search).get('payment') === '1');
   const [result, setResult] = useState(null);
   const [paymentResult, setPaymentResult] = useState(null);
   const [cancellation, setCancellation] = useState(null);
+  const [cancelReasonValid, setCancelReasonValid] = useState(false);
   const [cancellationNotice, setCancellationNotice] = useState(null);
   const cancellationRequest = useRef(null);
   const current = result && user && result.ownerId === user.user_id && result.orderId === id ? result : null;
@@ -221,12 +230,22 @@ export default function OrderDetailPage({ orderId }) {
   const loading = authLoading || !current || current.loading;
   const activeCancellation = cancellation?.ownerId === user?.user_id && cancellation?.orderId === id ? cancellation : null;
   const activeNotice = cancellationNotice?.ownerId === user?.user_id && cancellationNotice?.orderId === id ? cancellationNotice.message : '';
+  useChatPageState({ phase: !validId || current?.status === 404 ? 'not_found' : loading ? 'loading' : current?.error ? 'error' : 'ready',
+    busy: Boolean(activeCancellation?.busy), cancel_dialog: Boolean(activeCancellation), cancel_error: Boolean(activeCancellation?.error),
+    cancel_reason_valid: cancelReasonValid, cancel_visible: order?.can_cancel === true });
 
   useEffect(() => {
     setCancellation(null);
     setCancellationNotice(null);
     return () => { cancellationRequest.current = null; };
   }, [user?.user_id, id]);
+
+  function closePayment() {
+    setPaymentOpen(false);
+    const url = new URL(window.location.href);
+    url.searchParams.delete('payment');
+    window.history.replaceState(null, '', `${url.pathname}${url.search}${url.hash}`);
+  }
 
   async function confirmCancellation(payload) {
     if (cancellationRequest.current || order?.can_cancel !== true || !user || !activeCancellation) return;
@@ -335,9 +354,9 @@ export default function OrderDetailPage({ orderId }) {
           <div className="order-detail-subtotal"><dt>Tạm tính</dt><dd>{formatOrderMoney(order.subtotal_amount ?? order.total_amount, true)}</dd></div>
           <div className="order-detail-voucher-discount"><dt>Giảm giá Voucher{order.voucher_code_snapshot ? <span className="order-detail-voucher-code">{order.voucher_code_snapshot}</span> : null}</dt><dd>{order.discount_amount == null ? 'Chưa có thông tin' : `−${formatOrderMoney(order.discount_amount, true)}`}</dd></div>
         </> : <div><dt>Tiền hàng</dt><dd>{formatOrderMoney(order.total_amount)}</dd></div>}<div><dt>Phí vận chuyển</dt><dd>Chưa tính</dd></div><div className="order-detail-total"><dt>Tổng tiền hàng</dt><dd>{formatOrderMoney(order.total_amount, hasVoucher)}</dd></div></dl><p className="order-detail-muted">Tổng tiền chưa gồm phí vận chuyển. Phí vận chuyển hiện chưa được quy định.</p></section>
-        <PaymentDetails order={order} state={paymentState} onRetry={() => setPaymentRetry(value => value + 1)} />
+        <PaymentDetails order={order} state={paymentState} paymentOpen={paymentOpen} onOpenPayment={() => setPaymentOpen(true)} onClosePayment={closePayment} onRetry={() => { setRetry(value => value + 1); setPaymentRetry(value => value + 1); }} />
       </aside></div>
-      {activeCancellation && <CancelOrderDialog order={order} busy={activeCancellation.busy} error={activeCancellation.error || (order.can_cancel !== true ? 'Trạng thái đơn hàng đã thay đổi. Đơn hàng hiện không đủ điều kiện hủy.' : '')} onClose={() => { if (!cancellationRequest.current) setCancellation(null); }} onConfirm={confirmCancellation} onReload={() => { setCancellation(null); setRetry(value => value + 1); }} />}
+      {activeCancellation && <CancelOrderDialog order={order} busy={activeCancellation.busy} error={activeCancellation.error || (order.can_cancel !== true ? 'Trạng thái đơn hàng đã thay đổi. Đơn hàng hiện không đủ điều kiện hủy.' : '')} onValidityChange={setCancelReasonValid} onClose={() => { if (!cancellationRequest.current) setCancellation(null); }} onConfirm={confirmCancellation} onReload={() => { setCancellation(null); setRetry(value => value + 1); }} />}
     </> : null}
   </div>;
 }

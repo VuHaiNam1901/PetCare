@@ -36,6 +36,9 @@ async function mutate(adminId, orderId, action, target, cashReceived, reason) {
         const order = orderTime.normalizeOrderClock(storedOrder);
         const [[payment]] = await db.execute(`SELECT *${orderTime.selectPaymentClock()} FROM payments WHERE order_id = ? FOR UPDATE`, [orderId]);
         if (payment) orderTime.normalizeOrderClock(payment);
+        if (action === 'approve' && payment?.payment_method === 'ONLINE' && !isV2(order)) {
+            fail('Đơn Online cũ cần đối soát; không sử dụng thao tác duyệt trước thanh toán.');
+        }
         consistent(order, payment);
         if (isV2(order) && (action === 'approve' || (action === 'status' && ['Đang giao hàng', 'Đã giao hàng'].includes(target)))) {
             // A projection saying "paid" is insufficient authority to fulfill.
@@ -47,12 +50,12 @@ async function mutate(adminId, orderId, action, target, cashReceived, reason) {
         if (action === 'approve') {
             if (['Đã hủy', 'Đã giao hàng'].includes(order.status)) fail('Không thể duyệt đơn hàng đã kết thúc.');
             if (!order.approved_at) {
-                const expected = payment.payment_method === 'COD' || isV2(order) ? 'Chờ xử lý' : 'Chờ thanh toán';
-                const expectedPayment = isV2(order) ? 'Đã thanh toán' : 'Chưa thanh toán';
+                const expected = 'Chờ xử lý';
+                const expectedPayment = payment.payment_method === 'ONLINE' ? 'Đã thanh toán' : 'Chưa thanh toán';
                 if (order.status !== expected || payment.payment_status !== expectedPayment) fail('Đơn hàng không còn chờ duyệt.');
                 if (payment.payment_method === 'COD' && order.voucher_code_snapshot) await require('./voucher').consumeLocked(db, order, payment);
                 await reservedProducts(db, order);
-                nextStatus = payment.payment_method === 'COD' || isV2(order) ? 'Chờ giao hàng' : 'Chờ thanh toán';
+                nextStatus = 'Chờ giao hàng';
                 await db.execute('UPDATE orders SET approved_at = NOW(), status = ? WHERE order_id = ?', [nextStatus, orderId]);
                 changed = true;
             }
@@ -135,8 +138,8 @@ exports.list = async (page, limit, status, q, approval) => {
             // Default-off deployment must still read the unchanged 005 schema.
             const [columns] = await db.execute("SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='orders' AND COLUMN_NAME='workflow_version'");
             conditions.push(columns.length
-                ? "o.approved_at IS NULL AND o.stock_restored_at IS NULL AND ((p.payment_method = 'COD' AND o.status = 'Chờ xử lý') OR (p.payment_method = 'ONLINE' AND ((o.workflow_version IS NULL AND o.status = 'Chờ thanh toán') OR (o.workflow_version = 2 AND o.status = 'Chờ xử lý' AND p.payment_status = 'Đã thanh toán'))))"
-                : "o.approved_at IS NULL AND o.stock_restored_at IS NULL AND ((p.payment_method = 'COD' AND o.status = 'Chờ xử lý') OR (p.payment_method = 'ONLINE' AND o.status = 'Chờ thanh toán'))");
+                ? "o.approved_at IS NULL AND o.stock_restored_at IS NULL AND o.status = 'Chờ xử lý' AND (p.payment_method = 'COD' OR (p.payment_method = 'ONLINE' AND o.workflow_version = 2 AND p.payment_status = 'Đã thanh toán'))"
+                : "o.approved_at IS NULL AND o.stock_restored_at IS NULL AND p.payment_method = 'COD' AND o.status = 'Chờ xử lý'");
         }
         if (approval === 'approved') conditions.push("o.approved_at IS NOT NULL AND o.status <> 'Đã hủy'");
         if (approval === 'rejected') conditions.push("o.status = 'Đã hủy' AND o.rejection_reason IS NOT NULL");

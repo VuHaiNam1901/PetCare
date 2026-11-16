@@ -1,10 +1,14 @@
 import { useEffect, useState } from 'react';
-import { getProductReviews } from '../services/reviews.js';
+import { getProductReviews, watchReviewUpdates } from '../services/reviews.js';
 
 export default function useProductReviews(productId, { page = 1, limit = 10, rating = '', enabled = true } = {}) {
   const [attempt, setAttempt] = useState(0);
   const key = JSON.stringify([productId, page, limit, rating, enabled, attempt]);
   const [state, setState] = useState({ key, loading: enabled, data: null, error: '', status: null });
+
+  useEffect(() => {
+    if (enabled) return watchReviewUpdates(() => setAttempt(value => value + 1), productId);
+  }, [enabled, productId]);
 
   useEffect(() => {
     if (!enabled) return;

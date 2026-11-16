@@ -17,6 +17,7 @@ const { createChatRouter } = require('./routes/chat');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+app.use(require('./routes/sepay').createSePayWebhookRouter({ pool }));
 app.use(cors());
 app.use(express.json());
 app.use('/api', authRoutes);
@@ -116,6 +117,14 @@ app.use((error, req, res, next) => {
 });
 
 async function start() {
+    const sepay = require('./config/sepay');
+    if (sepay.enabled()) {
+        sepay.settings();
+        sepay.writesEnabled();
+        const db = await pool.getConnection();
+        try { await sepay.assertDatabase(db); }
+        finally { db.release(); }
+    }
     const workflow = require('./config/order-workflow');
     const config = workflow.settings();
     if (config.enabled) workflow.assertWorkflowCreationAllowed();
@@ -148,4 +157,5 @@ if (require.main === module) start().catch(error => {
     process.exitCode = 1;
     pool.end();
 });
+app.start = start;
 module.exports = app;

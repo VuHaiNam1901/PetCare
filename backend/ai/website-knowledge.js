@@ -33,17 +33,29 @@ function getWebsiteGuides(args) {
 // Only a successfully retrieved guide in this request authorizes website
 // prose. These guards bound concrete routes, labels and numeric rules; Gemini
 // must still paraphrase the conditions faithfully, never infer account state.
-function validateWebsiteProse(text, guides) {
+function validateWebsiteProse(text, guides, pageContext) {
     if (!Array.isArray(guides) || !guides.length || guides.some(guide => !byId.has(guide.id))) reject();
     const verified = guides.map(guide => byId.get(guide.id));
+    const { isResolvedPageContext, validatePageProse } = require('./page-context');
+    const current = isResolvedPageContext(pageContext) ? pageContext : null;
+    const currentLabels = current ? [current.page.name, ...current.ui.actions.map(action => action.label),
+        ...(current.order?.verification === 'verified' ? [current.order.status] : [])] : [];
+    validatePageProse(text, current);
     const allowedNumbers = new Set(numbers(JSON.stringify(verified.map(({ sources, ...guide }) => guide))));
+    // Only bounded, structural observations may add numbers to website prose.
+    // Never whitelist numeric substrings from raw URLs, input text or PII.
+    if (current) for (const value of [current.cart.item_count, current.cart.selected_count, current.state.quantity]) {
+        if (Number.isSafeInteger(value)) allowedNumbers.add(String(value));
+    }
     if (numbers(text).some(number => !allowedNumbers.has(number))) reject();
     const routes = new Set(verified.flatMap(guide => guide.routes));
+    if (current) routes.add(current.page.route);
     if (/\[[^\]\n]+\]\([^\)\n]+\)/.test(text)) reject();
     for (const match of text.matchAll(/\/(?:[a-z]|#)[a-z0-9_:/#?=&.-]*/gi)) {
         if (!routes.has(match[0].replace(/[.,;:]+$/, ''))) reject();
     }
     const labels = new Set(verified.flatMap(guide => [guide.name, ...guide.labels]).map(normalizeText));
+    for (const label of currentLabels) labels.add(normalizeText(label));
     for (const match of text.matchAll(/(?:nút|mục|trang|ô|phần|nhấn|bấm|chọn|mở)\s+["“]([^"”\n]{1,100})["”]/giu)) {
         if (!labels.has(normalizeText(match[1]))) reject();
     }
@@ -56,7 +68,7 @@ function validateWebsiteProse(text, guides) {
     for (const raw of text.split(/[.!?;\n]+|\b(?:nhưng|tuy nhiên)\b/iu)) {
         const clause = normalizeText(raw);
         const claim = /\bdon(?: hang)? (?:cua ban|so \d+|\d+)\b.{0,65}\b(?:da|dang|du dieu kien|con han|duoc huy|khong duoc huy)\b/.exec(clause);
-        if (claim && !/\b(?:neu|khi|chua the xac nhan|khong the xac nhan|can kiem tra)\b/.test(clause.slice(0, claim.index))) reject();
+        if (claim && current?.order?.verification !== 'verified' && !/\b(?:neu|khi|chua the xac nhan|khong the xac nhan|can kiem tra)\b/.test(clause.slice(0, claim.index))) reject();
     }
     if (/\b(?:ben hon|ben nhat|do ben cao|chat luong cao)\b/.test(folded)) reject();
     if (/\bvnpay\b/.test(folded) && (!/\b(?:chua|khong)\b/.test(folded) ||
@@ -64,7 +76,7 @@ function validateWebsiteProse(text, guides) {
     // Mask only verified UI terms before the existing proper-name guard. No
     // product name or data from another request becomes trusted through KB.
     let prose = text;
-    for (const label of verified.flatMap(guide => guide.labels).sort((a, b) => b.length - a.length)) {
+    for (const label of [...verified.flatMap(guide => guide.labels), ...currentLabels].sort((a, b) => b.length - a.length)) {
         const pattern = label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
         prose = prose.replace(new RegExp(pattern, 'giu'), 'chức năng');
     }

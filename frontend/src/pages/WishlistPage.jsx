@@ -5,11 +5,12 @@ import { useWishlist } from '../context/WishlistContext.jsx';
 import ProductCard from '../components/ProductCard.jsx';
 import { ErrorNotice } from '../components/Feedback.jsx';
 import { BRAND_NAME } from '../config/branding.js';
+import { useChatPageState } from '../context/ChatPageContext.jsx';
 import '../wishlist.css';
 
 export default function WishlistPage({ onAction, cartBusy = false }) {
   const { user, authLoading } = useCommerce();
-  const { products, loading, error, refresh } = useWishlist();
+  const { products, loading, error, refresh, busyIds } = useWishlist();
   const [view, setView] = useState({ ownerId: null, entries: [] });
   const ownerId = user?.role === 'user' ? user.user_id : null;
   const entries = ownerId !== null && view.ownerId === ownerId ? view.entries : [];
@@ -47,6 +48,7 @@ export default function WishlistPage({ onAction, cartBusy = false }) {
   }, [ownerId, products, loading, error]);
 
   const pending = authLoading || !user || loading || (!error && ownerId !== null && view.ownerId !== ownerId);
+  useChatPageState({ phase: pending ? 'loading' : error ? 'error' : 'ready', has_items: products.length > 0, busy: busyIds.size > 0 });
   return <div className="container wishlist-page">
     <nav className="catalog-breadcrumbs" aria-label="Đường dẫn"><a href="/">Trang chủ</a><ChevronRight size={14} aria-hidden="true" /><span aria-current="page">Sản phẩm yêu thích</span></nav>
     <div className="wishlist-heading"><div><h1><Heart size={28} aria-hidden="true" />Sản phẩm yêu thích</h1><p>Lưu lại những món bạn muốn dành cho người bạn nhỏ.</p></div><a className="button button-outline" href="/products"><ShoppingBag size={16} aria-hidden="true" />Tiếp tục mua sắm</a></div>

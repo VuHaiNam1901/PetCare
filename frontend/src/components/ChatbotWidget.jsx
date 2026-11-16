@@ -8,25 +8,11 @@ import { ProductImage } from './ProductCard.jsx';
 import useChatbotDrag from '../hooks/useChatbotDrag.js';
 import { CHAT_AUTH_EVENT, chatIdentity, restoreChatConversation, saveChatConversation } from '../utils/chat-session.js';
 import { chatbotDisplay } from '../utils/chatbot-display.js';
+import { useChatPageContext } from '../context/ChatPageContext.jsx';
+import chatbotPawIcon from '../assets/chatbot-paw.png';
 
-function ChatbotAvatar({ size = 26 }) {
-  return (
-    <span className="chatbot-avatar" aria-hidden="true">
-      <svg width={size} height={size} viewBox="0 0 64 64" fill="none" aria-hidden="true">
-        <path d="M32 14V7" stroke="#C6ECFF" strokeWidth="3" strokeLinecap="round" />
-        <circle cx="32" cy="6" r="4" fill="#FFD777" />
-        <path d="M19 19C9 13 5 21 7 33C8 40 13 40 18 34M45 19C55 13 59 21 57 33C56 40 51 40 46 34" fill="#9DD9FF" stroke="#185C9E" strokeWidth="2.5" strokeLinejoin="round" />
-        <rect x="14" y="15" width="36" height="39" rx="15" fill="#FFF9EF" stroke="#185C9E" strokeWidth="2.5" />
-        <rect x="20" y="25" width="24" height="13" rx="6.5" fill="#D9F2FF" />
-        <circle cx="25" cy="31" r="3" fill="#185C9E" /><circle cx="39" cy="31" r="3" fill="#185C9E" />
-        <circle cx="26" cy="30" r="1" fill="white" /><circle cx="40" cy="30" r="1" fill="white" />
-        <ellipse cx="32" cy="42" rx="10" ry="8" fill="#E4F2FC" />
-        <path d="M29 39Q32 37 35 39Q35 42 32 43Q29 42 29 39Z" fill="#185C9E" />
-        <path d="M32 43V45M26 44Q29 49 32 45Q35 49 38 44" stroke="#185C9E" strokeWidth="2" strokeLinecap="round" />
-        <ellipse cx="20" cy="40" rx="3" ry="2" fill="#FFB7B3" /><ellipse cx="44" cy="40" rx="3" ry="2" fill="#FFB7B3" />
-      </svg>
-    </span>
-  );
+function ChatbotIcon({ size = 32, className = '' }) {
+  return <img className={`chatbot-icon ${className}`} src={chatbotPawIcon} alt="" aria-hidden="true" width={size} height={size} draggable={false} />;
 }
 
 function ChatProducts({ products }) {
@@ -47,6 +33,7 @@ function ChatProducts({ products }) {
 // Closing keeps this session mounted. Both memory and saved conversation data
 // remain bound to the current identity; changing owners aborts old requests.
 function ChatSession({ open, closeChat, token, disabledReason, inputRef, panelRef, identity, initialConversation, revision = null, restoreError, onRestoreRetry }) {
+  const getPageContext = useChatPageContext();
   const [restored] = useState(initialConversation);
   const [input, setInput] = useState(restored?.input || '');
   const [turns, setTurns] = useState(restored?.turns || []);
@@ -121,7 +108,8 @@ function ChatSession({ open, closeChat, token, disabledReason, inputRef, panelRe
       ? previous.map(item => item.request.request_id === turn.request.request_id ? { ...turn, state: 'sending', error: null } : item)
       : [...previous, turn]);
     try {
-      const request = { ...turn.request, ...(!turn.request.session_id && sessionRef.current ? { session_id: sessionRef.current } : {}) };
+      const request = { ...turn.request, ...(!turn.request.session_id && sessionRef.current ? { session_id: sessionRef.current } : {}),
+        ...(getPageContext ? { page_context: getPageContext() } : {}) };
       const response = await sendChatMessageWithRecovery(request, { token, signal: controller.signal,
         onSession(session) {
           if (!alive.current || controller.signal.aborted) return;
@@ -191,7 +179,7 @@ function ChatSession({ open, closeChat, token, disabledReason, inputRef, panelRe
   return createPortal(
     <section ref={panelRef} className="chatbot-panel" id="petcare-chatbot" role="dialog" aria-modal="false" aria-labelledby="chatbot-title">
       <div className="chatbot-header">
-        <ChatbotAvatar />
+        <ChatbotIcon />
         <h2 id="chatbot-title">Trợ lý PetCareShop</h2>
         <button className="chatbot-close icon-button" type="button" aria-label="Đóng Trợ lý PetCareShop" onClick={closeChat}><X size={21} aria-hidden="true" /></button>
       </div>
@@ -199,7 +187,7 @@ function ChatSession({ open, closeChat, token, disabledReason, inputRef, panelRe
       {restoreError && <div className="chatbot-error" role="alert"><p>{restoreError.message}</p><button type="button" disabled={now < restoreError.retryAt} onClick={onRestoreRetry}>Thử lại</button></div>}
       <div className="chatbot-conversation" ref={conversationRef} role="log" aria-label="Hội thoại Trợ lý PetCareShop" aria-live="polite" aria-relevant="additions" aria-busy={sending}>
         {turns.length === 0 ? (
-          <div className="chatbot-empty" aria-hidden="true"><ChatbotAvatar size={22} /></div>
+          <div className="chatbot-empty" aria-hidden="true"><ChatbotIcon size={44} /></div>
         ) : turns.map(turn => {
           const retrySeconds = Math.max(0, Math.ceil((Math.max(turn.retryAt || 0, cooldownUntil) - now) / 1000));
           return (
@@ -316,7 +304,7 @@ export default function ChatbotWidget() {
         initialConversation={ready ? loaded.conversation : null} revision={ready ? loaded.revision : null}
         restoreError={recoveryError} onRestoreRetry={() => setRestoration(value => value + 1)} inputRef={inputRef} panelRef={panelRef} />}
       <button ref={openerRef} className="chatbot-toggle" type="button" aria-label={open ? 'Thu gọn Trợ lý PetCareShop' : 'Mở Trợ lý PetCareShop'} title="Trợ lý PetCareShop — kéo để di chuyển" aria-expanded={open} aria-controls="petcare-chatbot" {...dragEvents} onClick={event => { if (!consumeDragClick(event)) open ? closeChat() : changeOpen(true); }}>
-        <ChatbotAvatar size={42} /><span className="sr-only">Trợ lý PetCareShop</span>
+        <ChatbotIcon size={60} className="chatbot-toggle-image" /><span className="sr-only">Trợ lý PetCareShop</span>
       </button>
     </div>
   );

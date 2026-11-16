@@ -47,8 +47,10 @@ function consistent(order, payment) {
     } else {
         if (order.status === 'Chờ xử lý') fail('Trạng thái đơn Online không hợp lệ.');
         if (order.status === 'Chờ thanh toán' && payment.payment_status === 'Đã thanh toán') fail('Thanh toán Online đã ghi nhận nhưng trạng thái đơn chưa đồng bộ; cần kiểm tra hệ thống thanh toán.');
-        if (['Đã thanh toán', 'Thất bại'].includes(payment.payment_status) && !order.approved_at) fail('Thanh toán Online cần được Admin duyệt trước.');
-        if (order.status !== 'Chờ thanh toán' && (!order.approved_at || payment.payment_status !== 'Đã thanh toán')) fail('Đơn Online chỉ được giao sau khi đã duyệt và thanh toán thành công.');
+        // Historical rows remain readable/cancellable. They cannot enter the
+        // retired payment or pre-payment approval path; fulfillment still needs
+        // both a recorded payment and Admin approval.
+        if (order.status !== 'Chờ thanh toán' && (!order.approved_at || payment.payment_status !== 'Đã thanh toán')) fail('Đơn Online chỉ được giao sau khi đã thanh toán và được duyệt.');
     }
 }
 
@@ -61,7 +63,7 @@ function approvalState(order) {
         return order.status === 'Chờ thanh toán' ? 'awaiting_payment' : order.status === 'Chờ xử lý' ? 'pending' : 'legacy';
     }
     if (order.approved_at) return 'approved';
-    if (!order.stock_restored_at && order.status === (order.payment_method === 'COD' ? 'Chờ xử lý' : 'Chờ thanh toán')) return 'pending';
+    if (order.payment_method === 'COD' && !order.stock_restored_at && order.status === 'Chờ xử lý') return 'pending';
     return 'legacy';
 }
 
@@ -78,7 +80,8 @@ function decorate(order) {
     catch (error) { review_message = error.message; }
     const allowed_actions = [];
     if (!review_message) {
-        if (isV2(order) && approval_state === 'awaiting_payment') allowed_actions.push('reject');
+        if ((isV2(order) && approval_state === 'awaiting_payment') ||
+            (order.payment_method === 'ONLINE' && !isV2(order) && !order.approved_at && order.status === 'Chờ thanh toán')) allowed_actions.push('reject');
         else if (approval_state === 'pending' && (order.payment_status === 'Chưa thanh toán' || (isV2(order) && order.payment_status === 'Đã thanh toán'))) allowed_actions.push('approve', 'reject');
         else if (order.status === 'Chờ giao hàng') allowed_actions.push('ship');
         else if (order.status === 'Đang giao hàng') allowed_actions.push('deliver');

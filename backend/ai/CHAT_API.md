@@ -16,7 +16,7 @@ Authorization: Bearer <optional account JWT>
 }
 ```
 
-Only `message`, `request_id`, and optional `session_id` are accepted. `message`
+Only `message`, `request_id`, optional `session_id`, and optional `page_context` are accepted. `message`
 must contain 1–2000 Unicode characters and cannot consist only of whitespace.
 Unsafe ASCII control characters are rejected; tabs and line breaks are allowed.
 `request_id` must be a UUID. Clients generate a new UUID for each new turn and
@@ -25,6 +25,23 @@ Clients cannot supply account IDs, prior history, model options, modes, or filte
 Idempotency is scoped to a conversation. If the first HTTP response is lost
 before the client receives its session token, retrying without that token creates
 a new conversation; a UUID alone cannot safely identify an anonymous caller.
+
+`page_context` is a versioned, optional observation of a customer page, bounded
+to 4096 UTF-8 bytes. It has `{version:1, route, cart:{...}, state:{...}}`; route
+must be a known customer pathname without a query/hash. Only allowlisted counts,
+booleans, enums and invalid shipping **field names** survive normalization.
+Unknown/admin routes are ignored, malformed known-page observations return
+`400 INVALID_PAGE_CONTEXT`, and unknown properties never reach the model.
+Authentication comes from the existing JWT middleware. The orchestrator verifies
+the current product and reads the current order through the existing owner-scoped
+order model; frontend status and cancellation claims are discarded. No raw form
+values, account records, checkout draft, payment credentials or cart rows are sent.
+
+Context is resolved only for a new orchestrator turn and is not saved in the
+session, Memory Core facts or API response. Replays return the original saved
+answer without another context read; a new UUID observes the latest page/state.
+Legacy accepts the optional field while preserving its existing input/pipeline.
+See [Bước 4 implementation and handoff](PAGE_AWARENESS.md).
 
 A successful response has this shape, with the assistant's documented optional
 fields such as `warnings`, `intent`, `mode`, `model`, and `care_advice` included

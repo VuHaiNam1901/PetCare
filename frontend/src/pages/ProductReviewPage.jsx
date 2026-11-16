@@ -7,6 +7,7 @@ import { formatPrice, resolveImageUrl } from '../utils/catalog.js';
 import { formatOrderDate } from '../utils/orders.js';
 import { safeReturnUrl } from '../utils/auth-navigation.js';
 import { BRAND_NAME } from '../config/branding.js';
+import { useChatPageState } from '../context/ChatPageContext.jsx';
 import '../my-orders.css';
 import '../product-review.css';
 
@@ -72,6 +73,8 @@ function ReviewContent({ orderId, productId, userId }) {
   const submissionController = useRef(null);
   const current = result?.revision === revision ? result : null;
   const loading = !current || current.loading;
+  useChatPageState({ phase: loading ? 'loading' : current?.error ? 'error' : 'ready', busy,
+    reviewed: Boolean(current?.existing || duplicateDetected), review_blocked: Boolean(current?.blocked || serverDenied) });
   const orderHref = `/my-orders/${orderId}`;
 
   async function loadContext(signal, onProgress) {

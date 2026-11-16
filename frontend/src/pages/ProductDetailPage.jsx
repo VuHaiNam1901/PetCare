@@ -1,16 +1,18 @@
 import { useEffect, useState } from 'react';
+import { useChatPageState } from '../context/ChatPageContext.jsx';
 import { ChevronRight, Minus, Plus, ShoppingCart } from 'lucide-react';
 import ProductCard, { ProductImage } from '../components/ProductCard.jsx';
 import { ErrorNotice } from '../components/Feedback.jsx';
 import WishlistButton from '../components/WishlistButton.jsx';
-import { ReviewList, ReviewStars, formatReviewAverage } from '../components/ProductReviewContent.jsx';
+import ProductSoldCount from '../components/ProductSoldCount.jsx';
+import { ProductRating, ReviewList, ReviewStars, formatReviewAverage } from '../components/ProductReviewContent.jsx';
 import useProductReviews from '../hooks/useProductReviews.js';
 import { BRAND_NAME } from '../config/branding.js';
 import { formatPrice, resolveImageUrl } from '../utils/catalog.js';
 import '../product-reviews.css';
 
-function ProductReviewsPreview({ productId }) {
-  const { data, loading, error, retry } = useProductReviews(productId, { limit: 2 });
+function ProductReviewsPreview({ productId, reviews }) {
+  const { data, loading, error, retry } = reviews;
   return (
     <section className="product-review-preview detail-description-panel" aria-labelledby="product-review-preview-title">
       <div className="product-review-preview-heading section-heading">
@@ -37,6 +39,7 @@ function ProductReviewsPreview({ productId }) {
 
 function ProductDetails({ product, categoryName, related, onAction, cartBusy }) {
   const [requestedQuantity, setRequestedQuantity] = useState(1);
+  const reviews = useProductReviews(product.product_id, { limit: 2 });
   const stock = Number(product.stock_quantity);
   const stockKnown = product.stock_quantity != null && Number.isInteger(stock) && stock >= 0;
   const available = stockKnown && stock > 0;
@@ -44,6 +47,7 @@ function ProductDetails({ product, categoryName, related, onAction, cartBusy }) 
   const clampQuantity = value => Math.max(1, Math.min(maximum, Number.isFinite(Number(value)) ? Math.trunc(Number(value)) : 1));
   const quantity = clampQuantity(requestedQuantity);
   const imageUrl = resolveImageUrl(product.image_url);
+  useChatPageState({ phase: 'ready', quantity, busy: Boolean(cartBusy), purchase_disabled: !available || Boolean(cartBusy), quantity_disabled: !available });
 
   return (
     <>
@@ -52,6 +56,11 @@ function ProductDetails({ product, categoryName, related, onAction, cartBusy }) 
         <div className="detail-info">
           <p className="detail-category">Danh mục: <a href={`/products?category=${product.category_id}`}>{categoryName}</a></p>
           <h1 id="detail-title">{product.name}</h1>
+          <div className="product-detail-statistics">
+            <ProductRating average={reviews.data?.summary.average_rating} count={reviews.data?.summary.total} loading={reviews.loading} size={16} className="product-rating-detail" />
+            <span className="product-statistics-separator" aria-hidden="true">·</span>
+            <ProductSoldCount count={product.sold_quantity} />
+          </div>
           <p className="detail-price">{formatPrice(product.price)}</p>
           <p className={`detail-stock ${available ? 'in-stock' : ''}`}>{!stockKnown ? 'Tồn kho đang được cập nhật' : available ? `Còn hàng — ${stock} sản phẩm` : 'Hết hàng'}</p>
           <div className="detail-quantity">
@@ -76,7 +85,7 @@ function ProductDetails({ product, categoryName, related, onAction, cartBusy }) 
         <p className="detail-description">{typeof product.description === 'string' && product.description.trim() ? product.description : 'Mô tả sản phẩm đang được cập nhật.'}</p>
       </section>
 
-      <ProductReviewsPreview productId={product.product_id} />
+      <ProductReviewsPreview productId={product.product_id} reviews={reviews} />
 
       <section className="related-products" aria-labelledby="related-title">
         <div className="section-heading"><h2 id="related-title">Sản phẩm cùng danh mục</h2><a className="text-link" href={`/products?category=${product.category_id}`}>Xem tất cả<ChevronRight size={14} aria-hidden="true" /></a></div>
@@ -90,6 +99,7 @@ export default function ProductDetailPage({ productId, products, categories, loa
   const validId = /^[1-9]\d*$/.test(productId) && Number.isSafeInteger(Number(productId));
   const product = validId ? products.find(item => String(item.product_id) === productId) : undefined;
   const notFound = !validId || (!loading && !error && !product);
+  useChatPageState(notFound || loading || error ? { phase: notFound ? 'not_found' : loading ? 'loading' : 'error' } : null);
   const categoryName = product?.category_name || categories.find(category => String(category.category_id) === String(product?.category_id))?.name || 'Chưa phân loại';
   const related = product ? products.filter(item => String(item.category_id) === String(product.category_id) && String(item.product_id) !== String(product.product_id)).slice(0, 5) : [];
 

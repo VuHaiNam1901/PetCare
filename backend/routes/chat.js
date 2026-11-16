@@ -4,6 +4,7 @@ const { createSessionCodec, createChatStore, requestHash, chatError } = require(
 const { createChatLimiter } = require('../ai/rate-limit');
 const { runMeasured, setCode } = require('../ai/metrics');
 const { readChatPipeline } = require('../config/chat-pipeline');
+const { normalizePageContext, resolvePageContext } = require('../ai/page-context');
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const TRANSIENT = new Set(['CATALOG_UNAVAILABLE', 'GEMINI_BAD_REQUEST', 'GEMINI_AUTH', 'GEMINI_MODEL_UNAVAILABLE', 'GEMINI_QUOTA', 'GEMINI_TIMEOUT', 'GEMINI_UNAVAILABLE']);
@@ -31,7 +32,7 @@ function publicResponse(response) {
 }
 
 function createChatRouter({ assistant, store, limiter = createChatLimiter(), sessionCodec, capacity = sharedCapacity, onMetrics,
-    pipeline, assistantFactories } = {}) {
+    pipeline, assistantFactories, pageContextResolver = resolvePageContext } = {}) {
     // Snapshot configuration per router/process; clients cannot select a
     // pipeline, and an error never silently retries through another pipeline.
     const selectedPipeline = readChatPipeline(pipeline === undefined ? process.env : { CHAT_PIPELINE: pipeline });
@@ -160,7 +161,7 @@ function createChatRouter({ assistant, store, limiter = createChatLimiter(), ses
         res.once('close', disconnected);
         try {
             const body = req.body;
-            if (!body || typeof body !== 'object' || Array.isArray(body) || Object.keys(body).some(key => !['message', 'session_id', 'request_id'].includes(key)) ||
+            if (!body || typeof body !== 'object' || Array.isArray(body) || Object.keys(body).some(key => !['message', 'session_id', 'request_id', 'page_context'].includes(key)) ||
                 typeof body.message !== 'string' || !body.message.trim() || [...body.message].length > 2000 ||
                 /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/.test(body.message) ||
                 typeof body.request_id !== 'string' || !UUID.test(body.request_id) ||
@@ -168,6 +169,7 @@ function createChatRouter({ assistant, store, limiter = createChatLimiter(), ses
                 throw chatError(400, 'INVALID_REQUEST', 'Yêu cầu trò chuyện không hợp lệ. Vui lòng gửi tin nhắn từ 1–2000 ký tự.');
             }
             requestId = body.request_id.toLowerCase();
+            const pageObservation = normalizePageContext(body.page_context);
             const userId = req.user?.user_id ?? null;
             codec ||= createSessionCodec(require('../config/auth').secret);
             let access = { requireOwned: false };
@@ -194,8 +196,10 @@ function createChatRouter({ assistant, store, limiter = createChatLimiter(), ses
                 if (selectedPipeline === 'orchestrator') {
                     if (typeof session.loadMemory !== 'function') throw chatError(503, 'MEMORY_UNAVAILABLE', 'Chưa thể khôi phục ngữ cảnh cuộc trò chuyện. Bạn vui lòng thử lại.');
                     const memory = await session.loadMemory();
+                    const pageContext = pageObservation ? await pageContextResolver(pageObservation, { userId }) : null;
                     assistantInput = { message: body.message, turn_id: `u:${requestId}`, signal: controller.signal,
-                        ...(memory === null ? { history: await session.history() } : { memory }) };
+                        ...(memory === null ? { history: await session.history() } : { memory }),
+                        ...(pageContext ? { page_context: pageContext } : {}) };
                 } else assistantInput = { message: body.message, history: await session.history() };
                 // Replayed or invalid requests do not initialize either model.
                 if (!chatAssistant) {

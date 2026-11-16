@@ -4,6 +4,7 @@ import { ErrorNotice } from '../components/Feedback.jsx';
 import { ReviewList, ReviewSummary } from '../components/ProductReviewContent.jsx';
 import useProductReviews from '../hooks/useProductReviews.js';
 import { BRAND_NAME } from '../config/branding.js';
+import { useChatPageState } from '../context/ChatPageContext.jsx';
 import '../product-reviews.css';
 
 const maximumId = 2147483647;
@@ -34,6 +35,7 @@ export default function ProductReviewsPage({ productId }) {
   const { loading, error, status, data, retry } = useProductReviews(productId, { page: query.page, limit: query.limit, rating: query.rating, enabled: productValid && query.valid });
   const productName = data?.product.name;
   const pageCount = Math.max(1, Math.ceil((data?.total || 0) / query.limit));
+  useChatPageState({ phase: !productValid || status === 404 ? 'not_found' : !query.valid || error ? 'error' : loading ? 'loading' : 'ready', page: query.page });
 
   useEffect(() => {
     const previous = document.title;

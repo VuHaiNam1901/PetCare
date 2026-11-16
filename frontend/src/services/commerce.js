@@ -21,15 +21,18 @@ const orderMessages = {
   CART_CHANGED: 'Sản phẩm hoặc số lượng trong giỏ đã thay đổi. Vui lòng kiểm tra lại giỏ hàng.',
   OUT_OF_STOCK: 'Sản phẩm không còn đủ số lượng. Vui lòng kiểm tra lại tồn kho.',
   ORDER_TOTAL_TOO_LARGE: 'Tổng tiền vượt giới hạn cho phép. Vui lòng giảm số lượng đặt.',
+  ONLINE_PAYMENT_UNAVAILABLE: 'Thanh toán trực tuyến hiện chưa khả dụng. Vui lòng chọn COD.',
+  ONLINE_PAYMENT_AMOUNT_UNSUPPORTED: 'Số tiền không được hỗ trợ bởi thanh toán QR. Vui lòng chọn COD hoặc điều chỉnh đơn hàng.',
   IDEMPOTENCY_CONFLICT: 'Yêu cầu đặt hàng đã thay đổi. Vui lòng giữ nguyên lần đặt hàng đang chờ kết quả.',
   ORDER_RETRY: 'Đơn hàng đang được xử lý. Vui lòng thử lại để nhận kết quả.',
 };
 
-export async function commerceApi(path, { method = 'GET', body, token, headers = {}, signal } = {}) {
+export async function commerceApi(path, { method = 'GET', body, token, headers = {}, signal, cache } = {}) {
   let response;
   try {
     response = await fetch(`${API_ORIGIN}${path}`, {
       method, signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(15000)]) : AbortSignal.timeout(15000),
+      ...(cache ? { cache } : {}),
       headers: { Accept: 'application/json', ...(body === undefined ? {} : { 'Content-Type': 'application/json' }), ...(token ? { Authorization: `Bearer ${token}` } : {}), ...headers },
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
     });

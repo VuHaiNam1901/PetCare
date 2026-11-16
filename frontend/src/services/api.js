@@ -6,6 +6,7 @@ export async function fetchCollection(endpoint, collectionKey, signal) {
   try {
     response = await fetch(`${API_ORIGIN}${endpoint}`, {
       method: 'GET',
+      ...(collectionKey === 'products' ? { cache: 'no-store' } : {}),
       headers: { Accept: 'application/json' },
       signal,
     });

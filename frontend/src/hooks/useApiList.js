@@ -1,15 +1,21 @@
 import { useEffect, useState } from 'react';
 import { fetchCollection } from '../services/api.js';
+import { watchReviewUpdates } from '../services/reviews.js';
 
 export function useApiList(endpoint, collectionKey) {
   const [attempt, setAttempt] = useState(0);
   const [state, setState] = useState({ data: [], loading: true, error: '' });
 
   useEffect(() => {
+    if (collectionKey === 'products') return watchReviewUpdates(() => setAttempt(value => value + 1));
+  }, [collectionKey]);
+
+  useEffect(() => {
     const controller = new AbortController();
     let active = true;
     let timedOut = false;
-    setState({ data: [], loading: true, error: '' });
+    setState(previous => collectionKey === 'products' && !previous.loading && !previous.error
+      ? { ...previous, error: '' } : { data: [], loading: true, error: '' });
 
     const timeout = setTimeout(() => {
       timedOut = true;

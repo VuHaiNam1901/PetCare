@@ -5,6 +5,7 @@ import CareHighlights from './CareHighlights.jsx';
 import { EmptyState, ErrorNotice } from './Feedback.jsx';
 import { normalizeText } from '../utils/catalog.js';
 import { PetTypeChoices, PET_TYPE_LABELS } from './PetTypeSection.jsx';
+import { useChatPageState } from '../context/ChatPageContext.jsx';
 
 const PAGE_SIZE = 8;
 
@@ -46,6 +47,12 @@ export default function ProductSection({ products, categories, loading, error, r
     if (listing) setSort('newest');
   };
   const Heading = listing ? 'h1' : 'h2';
+  useChatPageState({ phase: catalogLoading ? 'loading' : catalogError ? 'error' : 'ready',
+    search_active: Boolean(query.trim()), category_id: Number(selectedCategory), pet_filter_active: Boolean(selectedPetType),
+    sort, page: Math.ceil(visibleLimit / PAGE_SIZE), category_filter_visible: !listing || (!categoriesLoading && !categoriesError),
+    pet_filter_visible: !petTypesLoading && !petTypesError && petTypes.length > 0,
+    reset_visible: !catalogLoading && !catalogError && Boolean((listing || filtered.length > 0) && (query || selectedCategory !== 'all' || selectedPetType || (listing && sort !== 'newest'))),
+    can_load_more: !catalogLoading && !catalogError && visibleLimit < filtered.length });
   const categoryFilters = (
     <div className="catalog-filter" aria-label="Lọc danh mục sản phẩm">
       <button className={`filter-pill ${selectedCategory === 'all' ? 'active' : ''}`} type="button" onClick={() => onCategoryChange('all')} aria-label="Tất cả sản phẩm" aria-pressed={selectedCategory === 'all'}>Tất cả</button>

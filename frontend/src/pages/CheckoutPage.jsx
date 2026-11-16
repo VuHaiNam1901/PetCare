@@ -8,7 +8,10 @@ import { orderStatusLabel } from '../utils/orders.js';
 import { beginCheckoutSubmission, clearCheckoutSubmission, completeCheckoutSubmission, readCheckoutDraft, saveCheckoutDraft, validateShipping } from '../utils/checkout.js';
 import { BRAND_NAME } from '../config/branding.js';
 import { useVoucherReadiness } from '../hooks/useVoucherReadiness.js';
+import usePaymentOptions from '../hooks/usePaymentOptions.js';
+import { canOpenOnlinePayment, supportsOnlineAmount } from '../services/payments.js';
 import CheckoutVoucher from '../components/CheckoutVoucher.jsx';
+import { useChatPageState } from '../context/ChatPageContext.jsx';
 import '../checkout.css';
 import '../checkout-voucher.css';
 
@@ -77,6 +80,7 @@ function CheckoutItem({ item }) {
 export default function CheckoutPage() {
   const { user, authLoading, cartSource, resumeCheckout, submitOrder, orderCommitted, quoteCheckoutVoucher } = useCommerce();
   const voucherReadiness = useVoucherReadiness();
+  const paymentOptions = usePaymentOptions();
   const [draft, setDraft] = useState(null);
   const [initialized, setInitialized] = useState(false);
   const [redirecting, setRedirecting] = useState(false);
@@ -103,7 +107,7 @@ export default function CheckoutPage() {
   const apiPrices = useRef({});
   const formRef = useRef(null);
   const selectedCode = draft?.voucher_code || '';
-  const voucherAvailable = voucherReadiness.ready && (paymentMethod === 'COD' || voucherReadiness.onlineReady);
+  const voucherAvailable = voucherReadiness.ready && (paymentMethod === 'COD' || (voucherReadiness.onlineReady && paymentOptions.available));
   const quoteKey = voucherKey(draft, paymentMethod, preview.prices, user?.user_id);
   const currentQuote = voucherQuote?.requestKey === quoteKey && voucherQuote.voucher.code === selectedCode ? voucherQuote : null;
 
@@ -142,7 +146,7 @@ export default function CheckoutPage() {
     // Handles both a confirmed response and a saved result after reload. This
     // only reads the order; submission locks and the original retry key remain.
     setRedirecting(true);
-    window.location.replace(`/my-orders/${order.order_id}`);
+    window.location.replace(`/my-orders/${order.order_id}${canOpenOnlinePayment(order) ? '?payment=1' : ''}`);
   }, [authLoading, user?.user_id, user?.role, order]);
 
   function persist(patch) {
@@ -249,6 +253,11 @@ export default function CheckoutPage() {
     }
     if (!current.submission && current.voucher_code !== selectedCode) { setStorageError('Mã Voucher trong bản nháp đã thay đổi. Vui lòng tải lại trang để kiểm tra.'); return; }
     if (!user || user.role !== 'user' || cartSource === 'guest-merge') { await resumeCheckout(); return; }
+    if (!current.submission && paymentMethod === 'ONLINE' && (!paymentOptions.available ||
+      !supportsOnlineAmount(currentQuote?.total_amount ?? preview.subtotal))) {
+      setSubmitError(paymentOptions.available ? 'Số tiền không được hỗ trợ bởi thanh toán QR. Vui lòng chọn COD hoặc điều chỉnh đơn hàng.' : 'Thanh toán trực tuyến hiện chưa khả dụng. Vui lòng chọn COD.');
+      return;
+    }
     if (!current.submission && selectedCode && (!voucherAvailable || !currentQuote || voucherBusy)) {
       setVoucherError('Vui lòng kiểm tra lại Voucher hoặc bỏ mã trước khi đặt hàng.'); return;
     }
@@ -288,12 +297,13 @@ export default function CheckoutPage() {
     } catch (error) {
       if (sequence !== requestSequence.current) return;
       // These responses prove that this request did not commit. Ambiguous failures retain the key.
-      const rejected = ['INVALID_ORDER', 'CART_CHANGED', 'PRODUCT_UNAVAILABLE', 'OUT_OF_STOCK', 'ORDER_TOTAL_TOO_LARGE', ...voucherRejections].includes(error.code);
+      const rejected = ['INVALID_ORDER', 'CART_CHANGED', 'PRODUCT_UNAVAILABLE', 'OUT_OF_STOCK', 'ORDER_TOTAL_TOO_LARGE', 'ONLINE_PAYMENT_UNAVAILABLE', 'ONLINE_PAYMENT_AMOUNT_UNSUPPORTED', ...voucherRejections].includes(error.code);
       if (attempt && rejected) {
         try { setDraft(clearCheckoutSubmission(user.user_id, attempt.key)); }
         catch (failure) { setStorageError(failure.message); }
       }
       if (voucherRejections.includes(error.code)) { setVoucherQuote(null); setVoucherError(error.message); }
+      if (error.code === 'ONLINE_PAYMENT_UNAVAILABLE') paymentOptions.retry();
       if (![401, 403].includes(error.status)) setSubmitError(error.message);
     } finally {
       submitting.current = false;
@@ -304,7 +314,8 @@ export default function CheckoutPage() {
   const pending = Boolean(draft?.submission);
   const locked = confirming || pending || Boolean(order);
   const unavailable = !order && !pending && preview.rows.some(item => !item.available);
-  const disabled = confirming || Boolean(order || storageError) || (!pending && (loading || Boolean(previewError) || !preview.rows.length || unavailable || (selectedCode && (!voucherAvailable || !currentQuote || voucherBusy))));
+  const onlineUnavailable = paymentMethod === 'ONLINE' && (!paymentOptions.available || !supportsOnlineAmount(currentQuote?.total_amount ?? preview.subtotal));
+  const disabled = confirming || Boolean(order || storageError) || (!pending && (onlineUnavailable || loading || Boolean(previewError) || !preview.rows.length || unavailable || (selectedCode && (!voucherAvailable || !currentQuote || voucherBusy))));
   const hasVoucher = Boolean(order?.voucher_code_snapshot || (pending ? draft.submission.payload.voucher_code : selectedCode));
   const summaryAmount = hasVoucher ? voucherAmount : amount;
   const summaryQuote = currentQuote && (voucherAvailable || pending) ? currentQuote : null;
@@ -312,6 +323,14 @@ export default function CheckoutPage() {
   const discountAmount = order ? order.discount_amount : summaryQuote?.discount_amount;
   const totalAmount = order ? order.total_amount : hasVoucher ? summaryQuote?.total_amount ?? null : preview.subtotal;
   const editHref = draft?.type === 'buy-now' ? `/products/${draft.items[0].product_id}` : '/cart';
+  useChatPageState({ phase: authLoading || !initialized || redirecting ? 'loading' : 'ready',
+    has_draft: Boolean(draft), form_visible: Boolean(!authLoading && initialized && !redirecting && user?.role === 'user' && draft?.user_id === user.user_id && cartSource !== 'guest-merge'),
+    shipping_invalid: Object.keys(validateShipping(shipping)), payment_method: paymentMethod,
+    locked, pending_submission: pending, confirming, completed: Boolean(order), submit_disabled: Boolean(disabled),
+    preview_loading: loading, products_unavailable: unavailable, preview_error: Boolean(previewError), storage_error: Boolean(storageError),
+    voucher_visible: !order && voucherReadiness.ready, voucher_selected: Boolean(selectedCode), voucher_busy: voucherBusy,
+    voucher_disabled: Boolean(locked || !voucherAvailable || loading || previewError || unavailable || voucherBusy),
+    voucher_needs_check: Boolean(selectedCode && (!voucherAvailable || !currentQuote || voucherBusy)) });
   const field = (name, label, options = {}) => <div className={`checkout-field${options.wide ? ' checkout-field-wide' : ''}`}>
     <label htmlFor={`checkout-${name}`}>{label}{options.optional ? <span className="checkout-optional" aria-hidden="true"> (không bắt buộc)</span> : <span className="checkout-required" aria-hidden="true"> *</span>}</label>
     {options.multiline ? <textarea id={`checkout-${name}`} name={name} rows={name === 'address' ? 3 : 2} minLength={name === 'address' ? 5 : undefined} maxLength={name === 'address' ? 255 : 200} autoComplete={options.autoComplete} placeholder={options.placeholder} value={shipping[name]} required={!options.optional} aria-invalid={Boolean(errors[name])} aria-describedby={errors[name] ? `checkout-${name}-error` : undefined} disabled={locked} onChange={changeShipping} onBlur={blurField} />
@@ -333,7 +352,7 @@ export default function CheckoutPage() {
           {priceNotice && <div className="checkout-alert checkout-price-notice" role="status"><Info size={18} aria-hidden="true" /><p>Giá sản phẩm đã thay đổi. Vui lòng kiểm tra lại giá và tiền hàng trước khi xác nhận.</p></div>}
           {unavailable && <div className="checkout-alert is-error" role="alert"><AlertCircle size={18} aria-hidden="true" /><p>Một số sản phẩm chưa thể đặt hàng. Vui lòng <a href={editHref}>kiểm tra lại sản phẩm và số lượng</a> trước khi tiếp tục.</p></div>}
           {!pending && !order && !loading && preview.rows.length > 0 && preview.rows.every(item => !item.available) && <div className="checkout-alert"><ShoppingBag size={18} aria-hidden="true" /><p>Chưa có sản phẩm hợp lệ để đặt hàng. <a href="/products">Quay lại mua sắm</a> để chọn sản phẩm khác.</p></div>}
-          {order && <div className="checkout-alert is-success checkout-confirmation" role="status"><CheckCircle2 size={18} aria-hidden="true" /><div><p>Đặt hàng thành công. Mã đơn hàng: <strong>#{order.order_id}</strong>. Đơn hàng đã được lưu.</p><p>Trạng thái: {orderStatusLabel(order)}. Thanh toán: {order.payment_status}.</p><p>{order.payment_method === 'ONLINE' ? order.workflow_version === 2 ? 'Đơn Online được thanh toán trước khi Admin duyệt. Xem đơn hàng để theo dõi hướng dẫn thanh toán.' : 'Thanh toán ONLINE mô phỏng chỉ được thực hiện sau khi Admin duyệt đơn.' : order.total_amount === '0.00' ? 'Đơn COD được giảm toàn bộ tiền hàng. Cửa hàng sẽ duyệt đơn trước khi giao.' : 'Đơn COD cần được Admin duyệt trước khi giao. Bạn thanh toán khi nhận hàng.'}</p><a href="/products">Tiếp tục mua sắm</a></div></div>}
+          {order && <div className="checkout-alert is-success checkout-confirmation" role="status"><CheckCircle2 size={18} aria-hidden="true" /><div><p>Đặt hàng thành công. Mã đơn hàng: <strong>#{order.order_id}</strong>. Đơn hàng đã được lưu.</p><p>Trạng thái: {orderStatusLabel(order)}. Thanh toán: {order.payment_status}.</p><p>{order.payment_method === 'ONLINE' ? 'Mở QR để thanh toán trong thời hạn giữ hàng. Sau khi thanh toán thành công, đơn sẽ chờ cửa hàng duyệt.' : order.total_amount === '0.00' ? 'Đơn COD được giảm toàn bộ tiền hàng. Cửa hàng sẽ duyệt đơn trước khi giao.' : 'Đơn COD cần được Admin duyệt trước khi giao. Bạn thanh toán khi nhận hàng.'}</p><a href="/products">Tiếp tục mua sắm</a></div></div>}
 
           <form className="checkout-form" ref={formRef} noValidate onSubmit={confirm}>
             <div className="checkout-layout">
@@ -353,9 +372,11 @@ export default function CheckoutPage() {
                   <fieldset className="checkout-payment" disabled={locked}>
                     <legend><span className="checkout-card-heading"><span className="checkout-step" aria-hidden="true">2</span><span>Phương thức thanh toán</span></span></legend>
                     <div className="checkout-payment-options">
-                      {[{ value: 'COD', title: 'Thanh toán khi nhận hàng (COD)', description: 'Cửa hàng duyệt đơn trước khi giao. Bạn thanh toán khi nhận hàng.', Icon: Truck }, { value: 'ONLINE', title: 'Thanh toán online (mô phỏng)', description: voucherReadiness.onlineReady ? 'Thanh toán trước khi Admin duyệt. Hướng dẫn thanh toán được cập nhật trên đơn hàng.' : 'Chờ Admin duyệt trước khi thanh toán mô phỏng. Không cần nhập thông tin thẻ.', Icon: CreditCard }].map(({ value, title, description, Icon }) => <label key={value} className={`checkout-payment-option${paymentMethod === value ? ' is-selected' : ''}`}><input type="radio" name="payment_method" value={value} aria-label={title} checked={paymentMethod === value} onChange={() => { if (locked) return; setPaymentMethod(value); setVoucherError(''); setVoucherNotice(''); setSubmitError(''); persist({ payment_method: value }); }} /><span className="checkout-payment-copy"><strong>{title}</strong><small>{description}</small></span><Icon className="checkout-payment-icon" size={20} aria-hidden="true" /></label>)}
+                      {[{ value: 'COD', title: 'Thanh toán khi nhận hàng (COD)', description: 'Cửa hàng duyệt đơn trước khi giao. Bạn thanh toán khi nhận hàng.', Icon: Truck }, { value: 'ONLINE', title: paymentOptions.mode === 'test' ? 'Thanh toán online (DEMO / TEST)' : 'Thanh toán online qua QR', description: paymentOptions.loading ? 'Đang kiểm tra phương thức thanh toán.' : !paymentOptions.available ? 'Chưa khả dụng. Vui lòng chọn COD.' : paymentOptions.mode === 'test' ? 'Chỉ mô phỏng bằng QR DEMO. Không chuyển tiền thật.' : 'Mở QR ngay sau khi đặt hàng. Thanh toán thành công rồi chờ cửa hàng duyệt.', Icon: CreditCard }].map(({ value, title, description, Icon }) => <label key={value} className={`checkout-payment-option${paymentMethod === value ? ' is-selected' : ''}`}><input type="radio" name="payment_method" value={value} aria-label={title} disabled={value === 'ONLINE' && !paymentOptions.available} checked={paymentMethod === value} onChange={() => { if (locked) return; setPaymentMethod(value); setVoucherError(''); setVoucherNotice(''); setSubmitError(''); persist({ payment_method: value }); }} /><span className="checkout-payment-copy"><strong>{title}</strong><small>{description}</small></span><Icon className="checkout-payment-icon" size={20} aria-hidden="true" /></label>)}
                     </div>
-                    <p className="checkout-payment-note"><Info size={15} aria-hidden="true" />{voucherReadiness.onlineReady ? 'Online thanh toán trước, sau đó chờ Admin duyệt; COD được duyệt trước khi giao.' : 'Cả COD và Online đều cần Admin duyệt trước khi xử lý tiếp.'}</p>
+                    <p className="checkout-payment-note"><Info size={15} aria-hidden="true" />Online: đặt hàng → QR → thanh toán thành công → chờ cửa hàng duyệt. COD: thanh toán khi nhận hàng.</p>
+                    {!paymentOptions.loading && !paymentOptions.available && <p className="checkout-payment-note" role="status">{paymentOptions.error || 'Thanh toán trực tuyến hiện chưa khả dụng. Vui lòng chọn COD.'}<button className="checkout-refresh" type="button" disabled={locked} onClick={paymentOptions.retry}>Kiểm tra lại</button></p>}
+                    {paymentMethod === 'ONLINE' && paymentOptions.available && onlineUnavailable && !loading && <p className="checkout-field-error" role="status">Số tiền không được hỗ trợ bởi thanh toán QR. Vui lòng chọn COD hoặc điều chỉnh đơn hàng.</p>}
                   </fieldset>
                 </section>
               </div>

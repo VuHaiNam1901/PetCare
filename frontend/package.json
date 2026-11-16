@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:sandbox": "vite --mode sandbox",
     "build": "vite build",
     "test:vouchers": "playwright test --config playwright.vouchers.config.js",
     "preview": "vite preview",

@@ -1,6 +1,8 @@
 const { createHash, randomUUID } = require('node:crypto');
 const config = require('../config/order-workflow');
 const provider = require('../providers/simulated-payments');
+const sepayProvider = require('../providers/sepay-test');
+const sepayConfig = require('../config/sepay');
 const { selectOrderClock, normalizeOrderClock } = require('../models/order-time');
 
 const VERSION = 2;
@@ -45,9 +47,15 @@ function createOnlineOrderService({ pool, logger = console } = {}) {
         const [[row]] = await db.query('SELECT DATABASE() AS database_name');
         if (row.database_name !== process.env.PETCARE_TEST_DATABASE || row.database_name !== process.env.DB_NAME || !/^petcare_test_[a-f0-9]{32}$/.test(row.database_name || '')) fail('Simulator requires the selected isolated test database', 403, 'SIMULATOR_FORBIDDEN');
     }
-    async function transaction(action, { simulator = false } = {}) {
+    async function transaction(action, { simulator = false, sepayEnvironment = null } = {}) {
+        // Validate deployment switches before even acquiring a connection.
+        if (sepayEnvironment) {
+            sepayConfig.settings(sepayEnvironment);
+            if (!sepayConfig.writesEnabled(sepayEnvironment)) fail('SePay settlement is disabled', 503, 'SEPAY_TEST_FORBIDDEN');
+        }
         const db = await database().getConnection();
         try {
+            if (sepayEnvironment) await sepayConfig.assertWriteDatabase(db, sepayEnvironment);
             if (simulator) await assertSimulatorDatabase(db);
             await assertReady(db);
             await db.beginTransaction();
@@ -256,17 +264,71 @@ function createOnlineOrderService({ pool, logger = console } = {}) {
         if (result.expired) fail('Order payment deadline has expired', 409, 'PAYMENT_EXPIRED');
         return result;
     }
-    async function confirmProviderEvent(input) {
-        const evidence = provider.assertVerifiedPayment(input);
+    // Called with order/payment locked, so all concurrent QR opens and callbacks
+    // reuse the same stable SEPAY attempt. Account rotation cannot reuse intent.
+    async function sepayAttemptLocked(db, order, payment, env, fromCallback = false) {
+        const settings = sepayConfig.settings(env);
+        const reference = `PCS${order.order_id}`;
+        const fingerprint = hash({ paymentId: payment.payment_id, amount: payment.amount, currency: 'VND',
+            provider: 'SEPAY', environment: settings.providerEnvironment, bank: settings.bank, account: settings.accountNumber });
+        const [[previous]] = await db.execute("SELECT * FROM payment_attempts WHERE provider='SEPAY' AND provider_environment=? AND merchant_reference=? FOR UPDATE", [settings.providerEnvironment, reference]);
+        if (previous) {
+            if (previous.fingerprint !== fingerprint || previous.payment_id !== payment.payment_id ||
+                previous.amount !== payment.amount || previous.currency !== 'VND') fail('SePay payment intent does not match the stored payment or configured account');
+            return { ...previous, replayed: true };
+        }
+        // A verified callback can recover an intent even if the QR page was not
+        // opened. Its start is bounded by the stored order's creation, not a
+        // client timestamp. No new order, reservation or voucher is created.
+        const [created] = await db.execute(`INSERT INTO payment_attempts
+            (payment_id,provider,provider_environment,merchant_reference,idempotency_key_hash,fingerprint,amount,currency,status,initiated_at_utc)
+            SELECT ?,'SEPAY',?,?,?,?,?,'VND','initiated',${fromCallback ? 'created_at_utc' : 'UTC_TIMESTAMP(3)'}
+            FROM orders WHERE order_id=?`, [payment.payment_id, settings.providerEnvironment, reference,
+            hash(`sepay:${settings.accountNumber}:${order.order_id}`), fingerprint, payment.amount, order.order_id]);
+        const [[attempt]] = await db.execute('SELECT * FROM payment_attempts WHERE attempt_id=? FOR UPDATE', [created.insertId]);
+        return { ...attempt, replayed: false };
+    }
+    async function createSePayAttempt(userId, orderId, env = process.env) {
         return transaction(async db => {
-            const [[target]] = await db.execute(`SELECT a.attempt_id,p.order_id FROM payment_attempts a JOIN payments p ON p.payment_id=a.payment_id
+            const [[user]] = await db.execute('SELECT role,status FROM `user` WHERE user_id=? FOR SHARE', [userId]);
+            if (!user || user.role !== 'user' || user.status !== 'active') fail('Active user account required', 403);
+            const [[stored]] = await db.execute(`SELECT *${selectOrderClock()} FROM orders WHERE order_id=? AND user_id=? FOR UPDATE`, [orderId, userId]);
+            if (!stored) fail('Order not found', 404);
+            const order = normalizeOrderClock(stored);
+            const [[payment]] = await db.execute('SELECT * FROM payments WHERE order_id=? FOR UPDATE', [orderId]);
+            checkOrder(order, payment);
+            const now = await clock(db), times = await timing(db, orderId);
+            if (now.milliseconds < times.created || now.milliseconds >= times.expires) fail('Order payment deadline has expired', 409, 'PAYMENT_EXPIRED');
+            if (order.status !== 'Chờ thanh toán' || order.approved_at || order.stock_restored_at || payment.transaction_date ||
+                !['Chưa thanh toán', 'Thất bại'].includes(payment.payment_status)) fail('Order is not awaiting payment');
+            const attempt = await sepayAttemptLocked(db, order, payment, env);
+            if (['succeeded', 'captured_unapplied'].includes(attempt.status)) fail('SePay payment requires review');
+            return attempt;
+        }, { sepayEnvironment: env });
+    }
+    async function confirmProviderEvent(input) {
+        return confirmVerifiedEvent(provider.assertVerifiedPayment(input), { simulator: true });
+    }
+    async function confirmSePayEvent(input, env = process.env) {
+        return confirmVerifiedEvent(sepayProvider.assertVerifiedPayment(input, env), { sepayEnvironment: env });
+    }
+    async function confirmVerifiedEvent(evidence, guard) {
+        return transaction(async db => {
+            let target;
+            if (guard.sepayEnvironment) {
+                [[target]] = await db.execute('SELECT order_id FROM orders WHERE order_id=?', [evidence.orderId]);
+            } else {
+                [[target]] = await db.execute(`SELECT a.attempt_id,p.order_id FROM payment_attempts a JOIN payments p ON p.payment_id=a.payment_id
                 WHERE a.provider=? AND a.provider_environment=? AND a.merchant_reference=?`, [evidence.provider, evidence.providerEnvironment, evidence.merchantReference]);
+            }
             if (!target) fail('Payment attempt not found', 404);
             const [[order]] = await db.execute(`SELECT *${selectOrderClock()} FROM orders WHERE order_id = ? FOR UPDATE`, [target.order_id]);
             normalizeOrderClock(order);
             const [[payment]] = await db.execute('SELECT * FROM payments WHERE order_id = ? FOR UPDATE', [target.order_id]);
             checkOrder(order, payment);
-            const [[attempt]] = await db.execute('SELECT * FROM payment_attempts WHERE attempt_id = ? FOR UPDATE', [target.attempt_id]);
+            let attempt;
+            if (guard.sepayEnvironment) attempt = await sepayAttemptLocked(db, order, payment, guard.sepayEnvironment, true);
+            else [[attempt]] = await db.execute('SELECT * FROM payment_attempts WHERE attempt_id = ? FOR UPDATE', [target.attempt_id]);
             const eventKey = hash(`callback:${evidence.provider}:${evidence.providerEnvironment}:${evidence.eventId}`), payloadHash = hash(evidence);
             const [[priorEvent]] = await db.execute('SELECT * FROM payment_events WHERE event_key = ? FOR UPDATE', [eventKey]);
             if (priorEvent) {
@@ -330,9 +392,11 @@ function createOnlineOrderService({ pool, logger = console } = {}) {
                 // A trusted provider can assert a capture while supplying an
                 // unusable time. Retain that money claim for manual review; a
                 // requested refund is never permission to submit or mark it paid.
-                const matchingAmount = evidence.amount === attempt.amount && evidence.currency === attempt.currency;
+                const matchingAmount = evidence.amount === attempt.amount && evidence.currency === attempt.currency &&
+                    (!guard.sepayEnvironment || (evidence.amount === payment.amount && evidence.currency === 'VND'));
                 const onTime = validProviderTime && paid.milliseconds < times.expires;
-                const active = order.status === 'Chờ thanh toán' && !order.approved_at && !order.stock_restored_at && ['Chưa thanh toán', 'Thất bại'].includes(payment.payment_status) && !payment.transaction_date;
+                const active = order.status === 'Chờ thanh toán' && !order.approved_at && !order.stock_restored_at && ['Chưa thanh toán', 'Thất bại'].includes(payment.payment_status) && !payment.transaction_date &&
+                    (!guard.sepayEnvironment || now.milliseconds < times.expires);
                 disposition = active && onTime && matchingAmount ? 'applied' : !validProviderTime ? 'manual_review' : !matchingAmount ? 'amount_mismatch' : payment.payment_status === 'Đã thanh toán' ? 'excess_capture' : order.status === 'Đã hủy' ? 'cancelled_order' : 'late_capture';
                 await db.execute(`UPDATE payment_attempts SET status=?,disposition=?,provider_transaction_id=?,captured_amount=?,captured_currency=?,provider_paid_at_utc=?,received_at_utc=?,confirmed_at_utc=? WHERE attempt_id=?`,
                     [disposition === 'applied' ? 'succeeded' : 'captured_unapplied', disposition, evidence.providerTransactionId, evidence.amount, evidence.currency, paid?.sql || null, now.sql, now.sql, attempt.attempt_id]);
@@ -358,7 +422,7 @@ function createOnlineOrderService({ pool, logger = console } = {}) {
             }
             return { replayed: captured && attempt.provider_transaction_id === evidence.providerTransactionId, disposition, attempt_id: attempt.attempt_id,
                 ...(compensation.compensation_pending ? { compensation_pending: true, compensation_error: compensation.compensation_error } : {}) };
-        }, { simulator: true });
+        }, guard);
     }
     async function simulate(userId, orderId, testCase) {
         if (!['ONLINE_SUCCESS', 'ONLINE_FAILURE'].includes(testCase)) fail('Invalid simulation test case', 400);
@@ -427,10 +491,10 @@ function createOnlineOrderService({ pool, logger = console } = {}) {
         }
         return { scanned: candidates.length, expired, skipped, errors, nextCursor: candidates.at(-1)?.order_id ?? afterOrderId };
     }
-    return { assertReady, assertAppliedPayment, createAttempt, simulate, confirmProviderEvent, confirmRefundEvent, rejectLocked, cancelLocked, releaseStockLocked, expireLocked, expireBatch, readRefunds };
+    return { assertReady, assertAppliedPayment, createAttempt, createSePayAttempt, simulate, confirmProviderEvent, confirmSePayEvent, confirmRefundEvent, rejectLocked, cancelLocked, releaseStockLocked, expireLocked, expireBatch, readRefunds };
 }
 
 let singleton;
 const defaultService = () => singleton ||= createOnlineOrderService();
 module.exports = { createOnlineOrderService, isNewOnline };
-for (const name of ['assertReady', 'assertAppliedPayment', 'createAttempt', 'simulate', 'confirmProviderEvent', 'confirmRefundEvent', 'rejectLocked', 'cancelLocked', 'releaseStockLocked', 'expireLocked', 'expireBatch', 'readRefunds']) module.exports[name] = (...args) => defaultService()[name](...args);
+for (const name of ['assertReady', 'assertAppliedPayment', 'createAttempt', 'createSePayAttempt', 'simulate', 'confirmProviderEvent', 'confirmSePayEvent', 'confirmRefundEvent', 'rejectLocked', 'cancelLocked', 'releaseStockLocked', 'expireLocked', 'expireBatch', 'readRefunds']) module.exports[name] = (...args) => defaultService()[name](...args);

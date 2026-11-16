@@ -175,8 +175,9 @@ function assertNoConcreteMedication(text) {
 function validateProse(text, context) {
     const folded = normalizeText(text);
     assertNoConcreteMedication(text);
+    if (context.intent !== 'website_help') require('./page-context').validatePageProse(text, context.page_context);
     if (context.intent === 'website_help') {
-        const prose = require('./website-knowledge').validateWebsiteProse(text, context.website_guides);
+        const prose = require('./website-knowledge').validateWebsiteProse(text, context.website_guides, context.page_context);
         assertNoInventedName(prose, context);
         return;
     }

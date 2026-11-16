@@ -2,6 +2,8 @@ import { useState } from 'react';
 import { ImageOff, Plus, ShoppingCart } from 'lucide-react';
 import { displayImageUrl, formatPrice, resolveImageUrl } from '../utils/catalog.js';
 import WishlistButton from './WishlistButton.jsx';
+import { ProductRating } from './ProductReviewContent.jsx';
+import ProductSoldCount from './ProductSoldCount.jsx';
 
 export function ProductImage({ source, name, loading = 'lazy', width = 320, height = 320 }) {
   const [failed, setFailed] = useState(false);
@@ -25,7 +27,9 @@ export default function ProductCard({ product, categoryName, onAction, cartBusy 
       </div>
       <div className="product-info">
         <p className="product-category">{categoryName || 'Chưa phân loại'}</p>
-        <h3><a className="product-name-link" href={`/products/${product.product_id}`}>{product.name}</a></h3>
+        <h3><a className="product-name-link" href={`/products/${product.product_id}`} title={product.name}>{product.name}</a></h3>
+        <ProductRating average={product.average_rating} count={product.review_count} />
+        <ProductSoldCount count={product.sold_quantity} />
         <p className="product-price">{formatPrice(product.price)}</p>
         <div className="product-actions">
           <button className="button button-primary buy-now" type="button" disabled={unavailable || cartBusy} aria-label={`Mua ngay: ${product.name}`} title={unavailable ? 'Sản phẩm hiện chưa thể mua' : 'Mua ngay'} onClick={() => onAction?.('Mua ngay', product, 1)}>Mua ngay</button>

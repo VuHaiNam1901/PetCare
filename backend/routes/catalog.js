@@ -1,6 +1,8 @@
 const express = require('express');
 const pool = require('../config/db');
 const petTypes = require('../models/pet-types');
+const reviews = require('../models/review');
+const sales = require('../models/product-sales');
 const router = express.Router();
 const bad = message => { throw Object.assign(new Error(message), { status: 400 }); };
 const integer = (value, fallback) => value === undefined ? fallback : typeof value === 'string' && /^[1-9]\d*$/.test(value) && Number(value) <= 2147483647 ? Number(value) : NaN;
@@ -18,6 +20,7 @@ router.get('/pet-types', handle(async (req, res) => {
 }));
 
 router.get('/products', handle(async (req, res) => {
+    res.set('Cache-Control', 'no-store');
     const allowed = ['pet_type', 'category', 'category_id', 'q', 'page', 'limit', 'sort'];
     if (Object.keys(req.query).some(key => !allowed.includes(key) || typeof req.query[key] !== 'string')) bad('Unsupported filter');
     const paginated = Object.keys(req.query).length > 0;
@@ -57,6 +60,8 @@ router.get('/products', handle(async (req, res) => {
             p.price,p.stock_quantity,p.image_url,p.status,p.created_at ${from} ORDER BY ${sorts[sort]}
             ${paginated ? 'LIMIT ? OFFSET ?' : ''}`, paginated ? [...params, limit, (page - 1) * limit] : params);
         const result = await petTypes.attach(db, rows, current);
+        result.products = await reviews.attachProductSummaries(db, result.products);
+        result.products = await sales.attachSoldQuantities(db, result.products);
         await db.commit();
         res.json({ success: true, total: Number(aggregate.total), ...(paginated ? { page, limit } : {}), ...result });
     } catch (error) { await db.rollback(); throw error; }

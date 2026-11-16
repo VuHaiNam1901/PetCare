@@ -441,3 +441,30 @@ backups/
 .codex-chatbot-validation/
 frontend/chat-test-results/
 frontend/voucher-test-results/
+
+# Generated diagnostics and test artifacts (source tests and fixtures stay tracked)
+*.log.*
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+*-test-results/
+blob-report/
+test-artifacts/
+playwright-artifacts/
+test-traces/
+playwright-traces/
+**/playwright/.cache/
+.nyc_output/
+
+# Standalone frontend Playwright traces
+/frontend/trace.zip
+/frontend/trace-*.zip
+/frontend/traces/
+
+# Generated chatbot evaluation output; keep questions and evaluation scripts
+/backend/ai/live-evaluation*.json
+
+# Completed implementation and image-cleanup reports; retain recovery metadata
+/frontend/HOMEPAGE_UPDATE.md
+/image-migration/archive/*/REPORT.md

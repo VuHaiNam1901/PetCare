@@ -3,6 +3,12 @@ const { authenticate, authorize } = require('../middleware/auth');
 const orders = require('../models/order');
 const orderStatuses = require('../models/admin-order').states;
 const router = express.Router();
+router.get('/payment-options', async (req, res, next) => {
+    try {
+        res.set('Cache-Control', 'no-store');
+        res.json({ success: true, payment_options: await require('../models/payment').options() });
+    } catch (error) { next(error); }
+});
 router.use(authenticate, authorize('user'));
 router.use(require('./payments'));
 const id = value => Number.isSafeInteger(value) && value > 0 && value <= 2147483647;

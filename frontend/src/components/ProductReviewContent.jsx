@@ -4,6 +4,7 @@ import '../product-reviews.css';
 
 const stars = [1, 2, 3, 4, 5];
 const averageFormatter = new Intl.NumberFormat('vi-VN', { maximumFractionDigits: 1 });
+const productAverageFormatter = new Intl.NumberFormat('en-US', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
 // Decode only the five entities emitted by the review API, once. React still
 // renders the result as text, including any legacy markup in names/comments.
 const reviewText = value => String(value ?? '').replace(/&(amp|lt|gt|quot|#39);/g,
@@ -17,6 +18,18 @@ export function ReviewStars({ rating, size = 16 }) {
     <span className="review-stars-track" aria-hidden="true">{stars.map(star => <Star key={star} size={size} />)}</span>
     <span className="review-stars-fill" style={{ width: `${value * 20}%` }} aria-hidden="true"><span className="review-stars-track">{stars.map(star => <Star key={star} size={size} fill="currentColor" />)}</span></span>
   </span>;
+}
+
+export function ProductRating({ average, count, loading = false, size = 11, className = '' }) {
+  const validCount = Number.isSafeInteger(count) && count >= 0;
+  const rated = !loading && validCount && count > 0 && typeof average === 'number' && Number.isFinite(average) && average >= 1 && average <= 5;
+  const score = rated ? productAverageFormatter.format(average) : null;
+  const label = loading ? 'Đang tải đánh giá...' : rated ? `${score} trên 5 sao, ${count} đánh giá`
+    : validCount && count === 0 && average == null ? 'Chưa có đánh giá' : 'Chưa có thông tin đánh giá';
+  return <div className={`product-rating ${className}`} role="img" aria-label={label} title={label}>
+    {rated ? <><ReviewStars rating={average} size={size} /><strong>{score}/5</strong><span className="product-rating-count">({count} đánh giá)</span></>
+      : <span className="product-rating-empty">{label}</span>}
+  </div>;
 }
 
 export function ReviewSummary({ summary }) {

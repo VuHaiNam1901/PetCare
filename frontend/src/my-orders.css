@@ -111,3 +111,5 @@
   .my-orders-pagination button { padding-inline: 10px; font-size: 10px; }
   .my-orders-state { padding: 30px 18px; }
 }
+
+.my-order-payment-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; }

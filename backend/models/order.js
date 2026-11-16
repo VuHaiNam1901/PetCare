@@ -111,7 +111,7 @@ exports.create = async (userId, input, key) => {
     }
     const db = await pool.getConnection();
     try {
-        const newOnline = input.payment_method === 'ONLINE' && workflow.settings().enabled;
+        const newOnline = input.payment_method === 'ONLINE';
         await db.beginTransaction();
         // Same lock protocol as cart operations, shared across all server instances.
         const [[user]] = await db.execute('SELECT user_id, role, status, full_name FROM `user` WHERE user_id = ? FOR UPDATE', [userId]);
@@ -127,15 +127,13 @@ exports.create = async (userId, input, key) => {
         }
         // A committed replay does not depend on today's flags or Voucher terms.
         if (newOnline) {
-            workflow.assertWorkflowCreationAllowed();
-            await require('../services/online-orders').assertReady(db);
+            await require('./payment').assertOnlineCheckoutAllowed(db);
         }
         let voucher;
         if (input.voucher_code) {
             const vouchers = require('./voucher');
             vouchers.assertEnabled();
             await vouchers.assertReady(db);
-            if (input.payment_method === 'ONLINE' && !newOnline) fail(503, 'Online vouchers require the new order workflow', 'ORDER_WORKFLOW_DISABLED');
             // All Voucher mutations acquire this lock before product locks.
             voucher = await vouchers.lockByCode(db, input.voucher_code);
         }
@@ -174,6 +172,9 @@ exports.create = async (userId, input, key) => {
         const quote = voucher ? await require('./voucher').quoteLocked(db, { code: input.voucher_code, userId,
             subtotal: money(total), voucher, paymentMethod: input.payment_method }) : null;
         const payable = quote ? quote.total_amount : money(total);
+        if (newOnline && !require('../config/sepay').supportsAmount(payable)) {
+            fail(409, 'Số tiền không được hỗ trợ bởi thanh toán QR. Vui lòng chọn COD hoặc điều chỉnh đơn hàng.', 'ONLINE_PAYMENT_AMOUNT_UNSUPPORTED');
+        }
         const [created] = await db.execute(`INSERT INTO orders
             (user_id, order_date, total_amount, recipient_name, shipping_address, phone, status, note, idempotency_key_hash, request_fingerprint, stock_reserved_at, stock_reservation_source${newOnline ? ', workflow_version, created_at_utc, payment_expires_at' : ''}${voucher ? ', subtotal_amount, discount_amount, voucher_code_snapshot' : ''})
             VALUES (?, NOW(), ?, ?, ?, ?, ?, ?, ?, ?, NOW(), '${newOnline ? 'checkout-v6' : 'checkout-v5'}'${newOnline ? ', 2, UTC_TIMESTAMP(3), DATE_ADD(UTC_TIMESTAMP(3), INTERVAL 24 HOUR)' : ''}${voucher ? ', ?, ?, ?' : ''})`, [userId, payable, input.recipient_name, input.shipping_address, input.phone,

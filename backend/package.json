@@ -4,6 +4,13 @@
   "description": "",
   "main": "server.js",
   "scripts": {
+    "sandbox:setup": "node scripts/setup-sepay-sandbox.cjs",
+    "start:sandbox": "node scripts/start-sepay-sandbox-backend.cjs",
+    "sandbox:webhook": "node scripts/send-sepay-test-webhook.cjs",
+    "start:sepay-test": "node sepay-test/receiver.cjs",
+    "test:sepay-test": "node --test sepay-test/receiver.test.cjs",
+    "test:sepay-integration": "node scripts/run-sepay-tests.cjs",
+    "test:sepay-settlement": "node scripts/run-sepay-settlement-tests.cjs",
     "test:chat": "node scripts/run-chat-tests.cjs",
     "test:vouchers": "node scripts/run-voucher-tests.cjs",
     "test:stage1": "node scripts/run-stage1-tests.cjs",

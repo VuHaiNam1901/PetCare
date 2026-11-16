@@ -1,23 +1,44 @@
 const pool = require('../config/db');
-const { append: appendHistory } = require('./order-history');
 const { approvalState, consistent, customerCanCancel } = require('./order-policy');
 const history = require('./order-history');
 const workflow = require('../config/order-workflow');
 const clock = require('./order-time');
+const sepay = require('../config/sepay');
 
 const fail = (status, message) => { throw Object.assign(new Error(message), { status }); };
 
 function rejection(order, payment) {
     if (payment.payment_method !== 'ONLINE') return 'Only ONLINE orders support simulated payment';
+    if (order.workflow_version !== workflow.VERSION) return 'Historical Online orders require reconciliation';
     try { consistent(order, payment); } catch (error) { return error.message; }
-    if (order.workflow_version === workflow.VERSION) {
-        if (!order.payment_window_open) return 'Payment deadline has expired';
-    } else if (!order.approval_valid) return 'Admin approval is required before payment';
+    if (!order.payment_window_open) return 'Payment deadline has expired';
     if (order.status !== 'Chờ thanh toán' || order.stock_restored_at) return 'Order is not awaiting payment';
     if (!['Chưa thanh toán', 'Thất bại'].includes(payment.payment_status)) return 'Payment is already completed or unavailable';
     if (payment.transaction_date || payment.amount !== order.total_amount) return 'Order/payment data needs review';
     return null;
 }
+
+async function assertOnlineCheckoutAllowed(db) {
+    try {
+        const settings = sepay.checkoutSettings();
+        await sepay.assertWriteDatabase(db);
+        await require('../services/online-orders').assertReady(db);
+        return settings;
+    } catch {
+        throw Object.assign(new Error('Thanh toán trực tuyến hiện chưa khả dụng. Vui lòng chọn COD.'), { status: 503, code: 'ONLINE_PAYMENT_UNAVAILABLE' });
+    }
+}
+exports.assertOnlineCheckoutAllowed = assertOnlineCheckoutAllowed;
+exports.options = async () => {
+    try {
+        sepay.checkoutSettings(); // Disabled configurations never acquire a connection.
+        const db = await pool.getConnection();
+        try {
+            const settings = await assertOnlineCheckoutAllowed(db);
+            return { online_available: true, online_mode: settings.mode };
+        } finally { db.release(); }
+    } catch { return { online_available: false, online_mode: null }; }
+};
 
 function view(order, payment) {
     let simulationAllowed = true;
@@ -34,7 +55,10 @@ function view(order, payment) {
         cancellation_reason_code: order.cancellation_reason_code ?? null,
         cancellation_reason: order.cancellation_reason ?? null,
         cancelled_at: order.cancelled_at ?? null,
-        simulation_only: true
+        simulation_only: true, can_pay: false,
+        payment_unavailable_reason: payment.payment_method === 'ONLINE'
+            ? order.workflow_version === workflow.VERSION ? 'Thanh toán trực tuyến hiện chưa khả dụng.' : 'Đơn Online cũ cần cửa hàng đối soát; không thể mở thanh toán trên đơn này.'
+            : null
     };
 }
 
@@ -51,8 +75,25 @@ async function information(db, userId, orderId) {
     if (row.workflow_version === workflow.VERSION) {
         const [[window]] = await db.execute('SELECT payment_expires_at > UTC_TIMESTAMP(3) AS payment_window_open FROM orders WHERE order_id = ?', [orderId]);
         row.payment_window_open = Boolean(window.payment_window_open);
-        return { ...view(row, row), workflow_version: row.workflow_version, payment_expires_at: row.payment_expires_at,
+        const result = { ...view(row, row), workflow_version: row.workflow_version, payment_expires_at: row.payment_expires_at,
             refunds: await require('../services/online-orders').readRefunds(db, orderId) };
+        let settings;
+        try { settings = sepay.checkoutSettings(); } catch { /* Keep reading existing orders when payments are off. */ }
+        if (row.payment_method === 'ONLINE' && settings) {
+            const service = require('../services/sepay-test').createSePayService({ pool: db });
+            const qr = await service.qrForOrder(userId, orderId);
+            if (qr) result.sepay = qr;
+            result.sepayStatus = await service.getStatus(userId, orderId);
+            result.can_pay = Boolean(qr);
+            result.payment_unavailable_reason = qr ? null : 'Đơn hàng hiện không đủ điều kiện thanh toán. Vui lòng cập nhật trạng thái hoặc liên hệ cửa hàng.';
+            result.can_simulate = false;
+            result.simulation_only = settings.mode === 'test';
+            if (settings.mode === 'test') {
+                if (qr) result.sepayTest = qr;
+                result.sepayTestStatus = result.sepayStatus;
+            }
+        }
+        return result;
     }
     return view(row, row);
 }
@@ -67,45 +108,7 @@ exports.simulate = async (userId, orderId, testCase) => {
     // legacy orders. This endpoint remains available only in isolated tests.
     workflow.assertSimulationAllowed();
     const current = await information(pool, userId, orderId);
-    if (current.workflow_version === workflow.VERSION) {
-        const result = await require('../services/online-orders').simulate(userId, orderId, testCase);
-        return { simulated: true, outcome: cases[testCase], ...result, payment: await information(pool, userId, orderId) };
-    }
-    const db = await pool.getConnection();
-    try {
-        const [[selected]] = await db.query('SELECT DATABASE() AS database_name');
-        if (selected.database_name !== process.env.PETCARE_TEST_DATABASE || selected.database_name !== process.env.DB_NAME) {
-            throw Object.assign(new Error('Payment simulation requires the selected isolated test database'), { status: 503 });
-        }
-        await db.beginTransaction();
-        const [[user]] = await db.execute('SELECT role, status, full_name FROM `user` WHERE user_id = ? FOR SHARE', [userId]);
-        if (!user || user.role !== 'user' || user.status !== 'active') fail(403, 'Active user account required');
-        // Same order -> payment lock order as UC18, so cancellation and payment
-        // cannot both succeed, and concurrent success is recorded only once.
-        const [[storedOrder]] = await db.execute(`SELECT *${clock.selectOrderClock('')}
-            FROM orders WHERE order_id = ? AND user_id = ? FOR UPDATE`, [orderId, userId]);
-        const order = clock.normalizeOrderClock(storedOrder);
-        if (!order) fail(404, 'Order not found');
-        const [[payment]] = await db.execute('SELECT * FROM payments WHERE order_id = ? FOR UPDATE', [orderId]);
-        if (!payment) fail(409, 'Payment record is missing; order needs review');
-        const reason = rejection(order, payment);
-        if (reason) fail(409, reason);
-        const outcome = cases[testCase];
-        const succeeded = outcome === 'success';
-        await db.execute(`UPDATE payments SET payment_status = ?, transaction_date = ${succeeded ? 'NOW()' : 'NULL'} WHERE order_id = ?`, [succeeded ? 'Đã thanh toán' : 'Thất bại', orderId]);
-        await db.execute('UPDATE orders SET status = ? WHERE order_id = ?', [succeeded ? 'Chờ giao hàng' : 'Chờ thanh toán', orderId]);
-        await appendHistory(db, { orderId, fromStatus: order.status,
-            toStatus: succeeded ? 'Chờ giao hàng' : 'Chờ thanh toán', action: succeeded ? 'payment' : 'payment_failed',
-            actorId: userId, actorName: user.full_name });
-        const result = await information(db, userId, orderId);
-        await db.commit();
-        return { simulated: true, outcome, payment: result };
-    } catch (error) {
-        await db.rollback();
-        if (['ER_LOCK_DEADLOCK', 'ER_LOCK_WAIT_TIMEOUT'].includes(error.code)) {
-            error.status = 409;
-            error.message = 'Payment is busy; reload payment information before retrying';
-        }
-        throw error;
-    } finally { db.release(); }
+    if (current.workflow_version !== workflow.VERSION) fail(409, 'Đơn Online cũ cần cửa hàng đối soát; không thể thanh toán trên đơn này.');
+    const result = await require('../services/online-orders').simulate(userId, orderId, testCase);
+    return { simulated: true, outcome: cases[testCase], ...result, payment: await information(pool, userId, orderId) };
 };

@@ -49,8 +49,37 @@ export function getMyReviews(token, { page = 1, limit = 100, signal } = {}) {
   return reviewRequest(token, `/api/users/me/reviews?${params}`, { signal });
 }
 
-export function createProductReview(token, productId, { rating, comment }) {
-  return reviewRequest(token, `/api/products/${productId}/reviews`, { method: 'POST', body: { rating, comment } });
+export const REVIEWS_CHANGED = 'petcare:reviews-changed';
+
+// Refresh catalog summaries and public reviews after a submission, returning to
+// a tab, or restoring a page from the browser's back/forward cache.
+export function watchReviewUpdates(refresh, productId) {
+  if (typeof window === 'undefined' || typeof document === 'undefined') return () => {};
+  let timer;
+  const schedule = () => {
+    if (document.visibilityState === 'hidden') return;
+    clearTimeout(timer);
+    timer = setTimeout(refresh, 50);
+  };
+  const changed = event => { if (productId == null || Number(event.detail?.productId) === Number(productId)) schedule(); };
+  const restored = event => { if (event.persisted) schedule(); };
+  window.addEventListener(REVIEWS_CHANGED, changed);
+  window.addEventListener('focus', schedule);
+  window.addEventListener('pageshow', restored);
+  document.addEventListener('visibilitychange', schedule);
+  return () => {
+    clearTimeout(timer);
+    window.removeEventListener(REVIEWS_CHANGED, changed);
+    window.removeEventListener('focus', schedule);
+    window.removeEventListener('pageshow', restored);
+    document.removeEventListener('visibilitychange', schedule);
+  };
+}
+
+export async function createProductReview(token, productId, { rating, comment }) {
+  const result = await reviewRequest(token, `/api/products/${productId}/reviews`, { method: 'POST', body: { rating, comment } });
+  if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent(REVIEWS_CHANGED, { detail: { productId: Number(productId) } }));
+  return result;
 }
 
 const positiveInteger = value => /^[1-9]\d*$/.test(String(value)) && Number(value) <= 2147483647;
@@ -66,7 +95,7 @@ export async function getProductReviews(productId, { page = 1, limit = 10, ratin
   if (rating !== '') params.set('rating', String(rating));
   let data;
   try {
-    data = await commerceApi(`/api/products/${productId}/reviews?${params}`, { signal });
+    data = await commerceApi(`/api/products/${productId}/reviews?${params}`, { signal, cache: 'no-store' });
   } catch (error) {
     if (signal?.aborted) throw error;
     const message = error.status === 404 ? 'Không tìm thấy sản phẩm.'

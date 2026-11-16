@@ -11,10 +11,12 @@ const { validatePlan, redactPersonal, rejectionCode } = require('./grounding');
 const { measure, measureSync } = require('./metrics');
 const memoryCore = require('./memory');
 const { getWebsiteGuides } = require('./website-knowledge');
+const { isResolvedPageContext } = require('./page-context');
 const { SYSTEM_PROMPT, FUNCTION_DECLARATIONS, INTENTS } = require('./orchestrator-prompt');
 const DEFAULT_LIMITS = Object.freeze({ modelCalls: 4, toolCalls: 6, timeoutMs: 45000,
     inputBytes: 48000, toolResultBytes: 16000, outputTokens: 2048, totalTokens: 48000 });
 const PRODUCT_TOOLS = new Set(['list_categories', 'search_products', 'get_product_details', 'compare_products']);
+const EPHEMERAL_FACT = /^(?:page|route|current_page|cart(?:_.*)?|quantity|selected_quantity|order(?:_.*)?|can_cancel|checkout(?:_.*)?|ui(?:_.*)?|loading|busy|phase|logged_in|authenticated|payment(?:_.*)?)$/;
 const clone = value => JSON.parse(JSON.stringify(value));
 function failure(code, status = 503) {
     return Object.assign(new Error(status === 504 ? 'Lượt tư vấn đã hết thời gian chờ. Bạn vui lòng thử lại.' :
@@ -62,7 +64,9 @@ function createOrchestrator({ generate = createGeminiAdapter(), repository = cre
 
     return { async reply(input) {
         check(input && typeof input === 'object' && !Array.isArray(input) &&
-            Object.keys(input).every(key => ['message', 'history', 'memory', 'turn_id', 'signal'].includes(key)), 'INVALID_SEARCH');
+            Object.keys(input).every(key => ['message', 'history', 'memory', 'turn_id', 'signal', 'page_context'].includes(key)), 'INVALID_SEARCH');
+        check(input.page_context == null || isResolvedPageContext(input.page_context), 'INVALID_SEARCH');
+        const pageContext = input.page_context ?? null;
         check(typeof input.message === 'string' && input.message.trim() && [...input.message].length <= 2000 &&
             !/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/u.test(input.message), 'INVALID_SEARCH');
         check(input.signal === undefined || (input.signal && typeof input.signal.aborted === 'boolean' &&
@@ -108,7 +112,8 @@ function createOrchestrator({ generate = createGeminiAdapter(), repository = cre
                     ...(preparing ? { active_context: context.active_context, compaction,
                         recent_history: context.recent_history.filter(item => item.sequence > compaction.through_sequence) } : context), limits,
                     capabilities: { contact_human: false, execute_transactions: false, read_account_orders: false,
-                        website_usage_guides: true, verified_store_policies: false },
+                        website_usage_guides: true, verified_store_policies: false, current_page_awareness: Boolean(pageContext) },
+                    ...(pageContext ? { current_page: pageContext } : {}),
                     historical_product_facts_are_current: false,
                 }) }] };
             }
@@ -192,7 +197,7 @@ function createOrchestrator({ generate = createGeminiAdapter(), repository = cre
                                 ? args.advice.replace(/\\n/g, '\n').replace(/(^|\n)[ \t]*\d{1,2}[.)][ \t]+/g, '$1- ') : args.advice;
                             plan = measureSync('grounding_ms', () => validatePlan({ text: JSON.stringify({ advice, product_ids: args.product_ids, follow_up: args.follow_up, warnings: args.warnings }), candidates: [{ finishReason: 'STOP' }] },
                                 { mode: args.mode, intent: args.intent, products: [...evidence.values()], search,
-                                    website_guides: [...websiteGuides.values()] }));
+                                    website_guides: [...websiteGuides.values()], page_context: pageContext }));
                         }
                         catch (error) {
                             if (lastRound) throw failure('GROUNDING_REJECTED');
@@ -200,7 +205,7 @@ function createOrchestrator({ generate = createGeminiAdapter(), repository = cre
                                 response: { status: 'invalid_response', reason: rejectionCode(error),
                                     verified_product_ids: [...evidence.keys()],
                                     message: args.intent === 'website_help'
-                                        ? 'Chỉ diễn đạt lại guides đã đọc: tên nút/mục đúng labels, không bịa URL/số liệu/chính sách hoặc trạng thái đơn của khách. Không nói đã thực hiện thao tác. Không gợi ý thanh toán VNPAY. Dùng mode=care, product_ids=[]. Nếu chưa có guides, gọi get_website_guide trước; nếu thiếu thông tin, đọc feature_limits.'
+                                        ? 'Diễn đạt lại guides và current_page của lượt này. Chỉ chỉ dẫn bấm nút đang visible=true, enabled=true trên trang hiện tại; nếu đi tới trang khác phải nói rõ trang đích. Không dùng trạng thái/quyền hủy từ lịch sử hoặc frontend. Không bịa URL/số liệu/chính sách, không nói đã thao tác, không gợi ý VNPAY. Dùng mode=care, product_ids=[]. Nếu chưa có guides, gọi get_website_guide; nếu thiếu ngữ cảnh, hỏi làm rõ.'
                                         : 'Viết lại ngắn gọn bằng tiếng Việt. Không nhắc tên/nhãn hiệu, kể cả tên không tìm thấy; không viết số tiền, ngay cả giới hạn ngân sách, hoặc số tồn và khẳng định còn/hết hàng. Không dùng placeholder [product:...]. Các dữ kiện nằm trong thẻ; chỉ gọi ngân sách là "ngân sách bạn đã nêu". Chỉ dùng ID đã xác minh; so sánh theo thứ tự thẻ và kết quả compare_products. Nếu không có kết quả, chỉ nói chưa tìm được sản phẩm phù hợp yêu cầu.' } } });
                             continue;
                         }
@@ -229,6 +234,7 @@ function createOrchestrator({ generate = createGeminiAdapter(), repository = cre
                         shape(call.args, ['operations']);
                         try {
                             const operations = typeof call.args.operations === 'string' ? JSON.parse(call.args.operations) : call.args.operations;
+                            check(Array.isArray(operations) && operations.every(operation => !EPHEMERAL_FACT.test(operation?.key || '')), 'INVALID_MEMORY_UPDATE');
                             memory = memoryCore.applyMemoryPatch(memory, { base_revision: memory.revision, operations });
                         }
                         catch {

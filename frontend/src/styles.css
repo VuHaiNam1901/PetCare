@@ -144,8 +144,14 @@ h1 span { color: #2187CE; }
 .product-favorite { position: absolute; top: 6px; right: 5px; color: #537FB1; padding: 4px; background: #FFFFFFE6; }
 .product-info { padding: 5px 12px 12px; display: flex; flex-direction: column; flex: 1; }
 .product-category { font-size: 9px; color: #677F99; margin-bottom: 3px; line-height: 1.4; }
-.product-info h3 { font-size: 11px; font-weight: 600; line-height: 1.55; min-height: 3.1em; overflow-wrap: anywhere; }
+.product-info h3 { font-size: 11px; font-weight: 600; line-height: 1.55; min-height: 3.1em; max-height: 3.1em; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; overflow-wrap: anywhere; }
 .product-price { color: #ED4C21; font-size: 14px; font-weight: 700; margin-top: 7px; margin-bottom: 8px; }
+.product-sold-count { display: inline-block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--color-muted); font-size: 10px; line-height: 16px; }
+.product-card .product-sold-count { display: block; flex-shrink: 0; height: 16px; margin-top: 1px; }
+.product-detail-statistics { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 10px; margin: 10px 0 8px; }
+.product-detail-statistics .product-rating-detail { margin: 0; }
+.product-detail-statistics .product-sold-count { font-size: 13px; line-height: 1.5; }
+.product-statistics-separator { color: var(--color-muted); }
 .product-actions { display: grid; grid-template-columns: minmax(0, 1fr) 36px; gap: 6px; margin-top: auto; }
 .product-actions .button { min-width: 0; height: 36px; padding: 8px 4px; font-size: 11px; white-space: nowrap; }
 .product-actions .add-to-cart { padding: 0; background: #fff; border-color: var(--color-primary); color: var(--color-primary); }
@@ -282,20 +288,18 @@ h1 span { color: #2187CE; }
 .zalo-qr-name { margin-top: 4px; font-size: 16px; font-weight: 700; color: var(--color-text); letter-spacing: -.2px; }
 .zalo-qr-instruction { font-size: 13px; line-height: 1.55; color: var(--color-muted); max-width: 300px; }
 .chatbot-widget { position: fixed; left: 0; top: 0; z-index: 41; width: 60px; height: 60px; }
-.chatbot-toggle { display: grid; place-items: center; width: 100%; height: 100%; padding: 5px; border: 2px solid #fff; border-radius: 50%; color: #fff; background: var(--color-primary); box-shadow: 0 3px 12px #17324D20; cursor: grab; touch-action: none; user-select: none; transition: background .16s, box-shadow .16s; }
-.chatbot-toggle:hover { background: var(--color-primary-hover); }
+.chatbot-toggle { display: grid; place-items: center; width: 100%; height: 100%; padding: 0; border: 0; border-radius: 50%; background: transparent; box-shadow: none; cursor: grab; touch-action: none; user-select: none; }
 .chatbot-widget.is-dragging { will-change: transform; }
-.chatbot-widget.is-dragging .chatbot-toggle { cursor: grabbing; box-shadow: 0 7px 20px #17324D35; }
-.chatbot-toggle .chatbot-avatar { width: 100%; height: 100%; background: transparent; border: 0; }
+.chatbot-widget.is-dragging .chatbot-toggle { cursor: grabbing; }
+.chatbot-icon { display: block; flex-shrink: 0; object-fit: contain; padding: 0; border: 0; background: transparent; pointer-events: none; user-select: none; -webkit-user-drag: none; }
+.chatbot-toggle-image { width: 100%; height: 100%; }
 .chatbot-panel { display: flex; flex-direction: column; position: fixed; left: 0; top: 0; z-index: 40; width: 355px; height: min(480px, calc(100dvh - 24px)); max-height: calc(100dvh - 24px); border: 1px solid #C4DEF9; border-radius: 8px; overflow: hidden; background: #fff; box-shadow: 0 8px 30px #17324D20; animation: chatbot-panel-enter .16s ease-out; }
 @keyframes chatbot-panel-enter { from { opacity: 0; } to { opacity: 1; } }
 .chatbot-header { display: flex; align-items: center; gap: 10px; padding: 12px 13px; color: #fff; background: var(--color-primary); }
-.chatbot-avatar { display: inline-grid; place-items: center; width: 32px; height: 32px; border-radius: 50%; background: rgba(255, 255, 255, .18); border: 1.5px solid rgba(255, 255, 255, .65); color: #fff; flex-shrink: 0; }
 .chatbot-header h2 { font-size: 13px; letter-spacing: -.2px; }
 .chatbot-close { margin-left: auto; color: #fff; }
 .chatbot-conversation { flex: 1; min-height: 75px; overflow-y: auto; padding: 13px; overscroll-behavior: contain; }
 .chatbot-empty { min-height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 7px; text-align: center; color: var(--color-muted); font-size: 12px; }
-.chatbot-empty .chatbot-avatar { width: 44px; height: 44px; background: #EAF4FF; border-color: #BDD9F5; color: var(--color-primary); }
 .chatbot-user, .chatbot-assistant { margin-bottom: 10px; padding: 9px 12px; border-radius: 8px; overflow-wrap: anywhere; font-size: 12px; line-height: 1.65; }
 .chatbot-user { margin-left: 25px; background: #EAF4FF; }
 .chatbot-assistant { margin-right: 10px; background: #F5F8FB; border: 1px solid var(--color-border); }

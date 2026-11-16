@@ -5,7 +5,6 @@ import * as adminCategoriesApi from '../services/admin-categories.js';
 import * as adminUsersApi from '../services/admin-users.js';
 import * as profileApi from '../services/profile.js';
 import * as reviewsApi from '../services/reviews.js';
-import * as paymentsApi from '../services/payments.js';
 import * as vouchersApi from '../services/vouchers.js';
 import { AUTH_REDIRECT_KEY, activeAuthRedirect, authPageUrl, clearAuthRedirect, loginReturnUrl, purchaseLoginUrl, safeReturnUrl } from '../utils/auth-navigation.js';
 import { clearCheckoutDraft, prepareCheckoutDraft, readCheckoutDraft } from '../utils/checkout.js';
@@ -662,22 +661,6 @@ export function CommerceProvider({ children }) {
     if (!positive(id)) throw Object.assign(new Error('Mã sản phẩm không hợp lệ. Vui lòng mở lại sản phẩm từ đơn hàng.'), { status: 400 });
     return accountReviewRequest(token => reviewsApi.createProductReview(token, id, body));
   };
-  async function simulateOrderPayment(orderId, testCase) {
-    if (!userRef.current || !tokenRef.current) throw Object.assign(new Error('Vui lòng đăng nhập để mô phỏng thanh toán.'), { status: 401 });
-    if (userRef.current.role !== 'user') throw Object.assign(new Error('Mô phỏng thanh toán dành cho tài khoản khách hàng.'), { status: 403 });
-    const id = Number(orderId);
-    if (!positive(id)) throw Object.assign(new Error('Mã đơn hàng không hợp lệ. Vui lòng mở lại đơn từ danh sách.'), { status: 400 });
-    const generation = epoch.current;
-    try {
-      const result = await paymentsApi.simulateOrderPayment(tokenRef.current, id, testCase);
-      current(generation);
-      return result;
-    } catch (error) {
-      current(generation);
-      if (!error.obsolete) await expireSession(error);
-      throw error;
-    }
-  }
   async function submitOrder(payload, key) {
     return operation(async () => {
       checkCustomer();
@@ -751,7 +734,7 @@ export function CommerceProvider({ children }) {
     return false;
   }
 
-  return <Context.Provider value={{ user, authLoading, cart, cartLoading, cartError, busy, cartSource, mergeError, mergeConflicts, mergeCanEdit, pendingIntent, beginLogin, login, register, logout, retryCart, retryMerge, addItem, updateItem, removeItem, selectItem, selectAll, checkout, buyNow, resumeCheckout, submitOrder, orderCommitted, getOrders, getOrder, getOrderPayment, cancelOrder, getWishlist, saveWishlistProduct, getAdminOrders, getAdminOrder, approveAdminOrder, rejectAdminOrder, updateAdminOrder, getAdminProducts, getAdminProductCategories, getAdminPetTypes, createAdminProduct, updateAdminProduct, stopAdminProduct, getAdminCategories, createAdminCategory, updateAdminCategory, deleteAdminCategory, getAdminUsers, updateAdminUserStatus, getAdminVouchers, getAdminVoucher, createAdminVoucher, updateAdminVoucher, disableAdminVoucher, quoteCheckoutVoucher, getCheckoutVouchers, getProfile, updateProfile, getMyReviews, createProductReview, simulateOrderPayment, notify, notice, noticeType, clearNotice: () => setNotice('') }}>{children}</Context.Provider>;
+  return <Context.Provider value={{ user, authLoading, cart, cartLoading, cartError, busy, cartSource, mergeError, mergeConflicts, mergeCanEdit, pendingIntent, beginLogin, login, register, logout, retryCart, retryMerge, addItem, updateItem, removeItem, selectItem, selectAll, checkout, buyNow, resumeCheckout, submitOrder, orderCommitted, getOrders, getOrder, getOrderPayment, cancelOrder, getWishlist, saveWishlistProduct, getAdminOrders, getAdminOrder, approveAdminOrder, rejectAdminOrder, updateAdminOrder, getAdminProducts, getAdminProductCategories, getAdminPetTypes, createAdminProduct, updateAdminProduct, stopAdminProduct, getAdminCategories, createAdminCategory, updateAdminCategory, deleteAdminCategory, getAdminUsers, updateAdminUserStatus, getAdminVouchers, getAdminVoucher, createAdminVoucher, updateAdminVoucher, disableAdminVoucher, quoteCheckoutVoucher, getCheckoutVouchers, getProfile, updateProfile, getMyReviews, createProductReview, notify, notice, noticeType, clearNotice: () => setNotice('') }}>{children}</Context.Provider>;
 }
 
 export function useCommerce() {

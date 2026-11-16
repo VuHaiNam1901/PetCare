@@ -5,6 +5,7 @@ import { useVoucherReadiness } from '../hooks/useVoucherReadiness.js';
 import { ErrorNotice } from '../components/Feedback.jsx';
 import { safeReturnUrl } from '../utils/auth-navigation.js';
 import { BRAND_NAME } from '../config/branding.js';
+import { useChatPageState } from '../context/ChatPageContext.jsx';
 import '../my-orders.css';
 import '../profile.css';
 
@@ -36,6 +37,7 @@ function ProfileContent({ accountId }) {
   const current = result?.revision === revision ? result : null;
   const loading = !current || current.loading;
   const profile = current?.profile;
+  useChatPageState({ phase: loading ? 'loading' : current?.error ? 'error' : 'ready', editing, busy: saving });
 
   useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
   useEffect(() => { if (!editing) editButton.current?.focus(); }, [editing]);

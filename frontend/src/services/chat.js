@@ -1,4 +1,5 @@
 import { API_ORIGIN } from './api.js';
+import { customerChatRoute, sanitizeChatPageState } from '../utils/chat-page-context.js';
 
 // Gemini has a 45-second SDK deadline; leave time for the session lock and SQL.
 export const CHAT_TIMEOUT_MS = 65000;
@@ -108,8 +109,17 @@ function normalizeRequest(input) {
       (input.session_id !== undefined && (typeof input.session_id !== 'string' || !SESSION.test(input.session_id)))) {
     throw chatError('Tin nhắn chưa hợp lệ. Vui lòng kiểm tra nội dung trước khi gửi.', { status: 400, code: 'INVALID_REQUEST' });
   }
+  const context = input.page_context;
+  let pageContext;
+  if (context?.version === 1 && customerChatRoute(context.route)) {
+    const cart = {};
+    for (const key of ['item_count', 'selected_count', 'selectable_count', 'editable_quantity_count']) if (Number.isSafeInteger(context.cart?.[key]) && context.cart[key] >= 0 && context.cart[key] <= 100) cart[key] = context.cart[key];
+    for (const key of ['loading', 'error', 'busy', 'merging', 'merge_can_edit']) if (typeof context.cart?.[key] === 'boolean') cart[key] = context.cart[key];
+    pageContext = { version: 1, route: customerChatRoute(context.route), cart, state: sanitizeChatPageState(context.state) };
+  }
   return { message: input.message, request_id: input.request_id.toLowerCase(),
-    ...(input.session_id === undefined ? {} : { session_id: input.session_id }) };
+    ...(input.session_id === undefined ? {} : { session_id: input.session_id }),
+    ...(pageContext ? { page_context: pageContext } : {}) };
 }
 
 async function postChat(path, request, { token, signal, timeoutMs = CHAT_TIMEOUT_MS, validate = validateSuccess } = {}) {

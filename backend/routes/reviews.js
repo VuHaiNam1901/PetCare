@@ -24,6 +24,7 @@ function pagination(req, { forProduct = false } = {}) {
     return { page, limit };
 }
 router.get('/products/:id/reviews', handle(async (req, res) => {
+    res.set('Cache-Control', 'no-store');
     const id = productId(req);
     const { page, limit } = pagination(req, { forProduct: true });
     const rating = req.query.rating === undefined ? undefined : positive(req.query.rating);

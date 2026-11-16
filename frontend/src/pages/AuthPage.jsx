@@ -3,6 +3,7 @@ import { ChevronRight, LogIn, UserPlus } from 'lucide-react';
 import { useCommerce } from '../context/CommerceContext.jsx';
 import { BRAND_NAME } from '../config/branding.js';
 import { authPageUrl } from '../utils/auth-navigation.js';
+import { useChatPageState } from '../context/ChatPageContext.jsx';
 
 const messages = {
   'Invalid email or password': 'Email hoặc mật khẩu chưa đúng.',
@@ -16,6 +17,7 @@ export default function AuthPage({ mode = 'login' }) {
   const [form, setForm] = useState({ full_name: '', email: '', password: '', confirmation: '' });
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
+  useChatPageState({ phase: authLoading ? 'loading' : 'ready', busy: submitting });
   const justRegistered = !registering && new URLSearchParams(window.location.search).get('registered') === '1';
 
   useEffect(() => {
