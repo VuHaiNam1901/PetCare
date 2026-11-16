@@ -62,7 +62,7 @@ async function fetchPreview(items) {
 const pricesChanged = (previous, current) => Object.entries(current).some(([id, value]) => previous[id] != null && cents(previous[id]) != null && cents(previous[id]) !== cents(value));
 const receiptPreview = order => ({ rows: order.items.map(item => ({ ...item, price: item.unit_price, line_total: item.subtotal, available: true, availability_message: '' })), prices: {}, subtotal: order.subtotal_amount ?? order.total_amount });
 const voucherKey = (draft, method, prices, userId) => JSON.stringify([userId, draft?.intent_id, draft?.items, method, prices]);
-const voucherRejections = ['INVALID_VOUCHER', 'VOUCHER_NOT_FOUND', 'VOUCHER_INACTIVE', 'VOUCHER_NOT_STARTED', 'VOUCHER_EXPIRED', 'VOUCHER_MINIMUM_NOT_MET', 'VOUCHER_QUOTA_EXCEEDED', 'VOUCHER_USER_LIMIT_EXCEEDED', 'VOUCHER_ONLINE_ZERO_TOTAL', 'VOUCHERS_DISABLED', 'VOUCHER_SCHEMA_NOT_READY', 'ORDER_WORKFLOW_DISABLED'];
+const voucherRejections = ['INVALID_VOUCHER', 'VOUCHER_NOT_FOUND', 'VOUCHER_NOT_ASSIGNED', 'VOUCHER_INACTIVE', 'VOUCHER_NOT_STARTED', 'VOUCHER_EXPIRED', 'VOUCHER_MINIMUM_NOT_MET', 'VOUCHER_QUOTA_EXCEEDED', 'VOUCHER_USER_LIMIT_EXCEEDED', 'VOUCHER_ONLINE_ZERO_TOTAL', 'VOUCHERS_DISABLED', 'VOUCHER_SCHEMA_NOT_READY', 'VOUCHER_DISTRIBUTION_NOT_READY', 'ORDER_WORKFLOW_DISABLED'];
 
 function CheckoutItem({ item }) {
   const source = resolveImageUrl(item.image_url);

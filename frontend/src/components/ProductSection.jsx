@@ -4,7 +4,7 @@ import ProductCard from './ProductCard.jsx';
 import CareHighlights from './CareHighlights.jsx';
 import { EmptyState, ErrorNotice } from './Feedback.jsx';
 import { normalizeText } from '../utils/catalog.js';
-import { PetTypeChoices, PET_TYPE_LABELS } from './PetTypeSection.jsx';
+import { PetTypeChoices, PetTypePhotoCredits, PET_TYPE_LABELS } from './PetTypeSection.jsx';
 import { useChatPageState } from '../context/ChatPageContext.jsx';
 
 const PAGE_SIZE = 8;
@@ -19,7 +19,7 @@ export default function ProductSection({ products, categories, loading, error, r
   const [pagination, setPagination] = useState({ key: '', limit: PAGE_SIZE });
   const visibleLimit = listing && onPageChange ? page * PAGE_SIZE : pagination.key === filterKey ? pagination.limit : PAGE_SIZE;
   const selectedPet = petTypes.find(pet => pet.slug === selectedPetType);
-  const petName = selectedPet?.name || (Object.hasOwn(PET_TYPE_LABELS, selectedPetType) ? PET_TYPE_LABELS[selectedPetType] : 'Loài đã chọn');
+  const petName = Object.hasOwn(PET_TYPE_LABELS, selectedPetType) ? PET_TYPE_LABELS[selectedPetType] : selectedPet?.name || 'Loài đã chọn';
   const catalogLoading = loading || Boolean(selectedPetType && petTypesLoading);
   const catalogError = error || (selectedPetType ? petTypesError : '');
 
@@ -79,7 +79,7 @@ export default function ProductSection({ products, categories, loading, error, r
             <h2>Mua sắm theo thú cưng</h2>
             {petTypesLoading ? <p className="pet-type-status" role="status">Đang tải nhóm thú cưng...</p>
               : petTypesError ? <ErrorNotice title="Chưa tải được nhóm thú cưng" message={petTypesError} onRetry={retryPetTypes} />
-                : <PetTypeChoices petTypes={petTypes} selected={selectedPetType} onSelect={onPetTypeChange} />}
+                : <><PetTypeChoices petTypes={petTypes} selected={selectedPetType} onSelect={onPetTypeChange} /><PetTypePhotoCredits /></>}
           </div>}
           {selectedPetType && <div className="selected-pet-type"><span>Sản phẩm dành cho <strong>{petName}</strong></span><button className="text-link" type="button" onClick={() => onPetTypeChange('')}>Bỏ lọc thú cưng<X size={12} aria-hidden="true" /></button></div>}
         </>}
@@ -105,9 +105,9 @@ export default function ProductSection({ products, categories, loading, error, r
         ) : catalogError ? (
           <ErrorNotice title="Chưa tải được sản phẩm" message={catalogError} onRetry={error ? retry : retryPetTypes} />
         ) : products.length === 0 ? (
-          <EmptyState title="Sản phẩm đang được cập nhật" message="Bạn hãy ghé lại sau để khám phá sản phẩm dành cho thú cưng nhé." />
+          <EmptyState title={selectedPetType ? 'Chưa có sản phẩm phù hợp' : 'Sản phẩm đang được cập nhật'} message={selectedPetType ? `Hiện chưa có sản phẩm phù hợp dành cho ${petName}. Bạn hãy ghé lại sau hoặc chọn loài khác nhé.` : 'Bạn hãy ghé lại sau để khám phá sản phẩm dành cho thú cưng nhé.'} onReset={selectedPetType ? resetFilters : undefined} />
         ) : filtered.length === 0 ? (
-          <EmptyState title="Chưa tìm thấy sản phẩm phù hợp" message="Thử từ khóa khác hoặc chọn tất cả sản phẩm nhé." onReset={resetFilters} />
+          <EmptyState title="Chưa tìm thấy sản phẩm phù hợp" message={selectedPetType ? `Hiện chưa có sản phẩm phù hợp dành cho ${petName}. Bạn có thể bỏ bộ lọc hoặc chọn loài khác nhé.` : 'Thử từ khóa khác hoặc chọn tất cả sản phẩm nhé.'} onReset={resetFilters} />
         ) : (
           <>
             <div className="product-grid">

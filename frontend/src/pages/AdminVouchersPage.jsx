@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
-import { Ban, Check, ChevronLeft, ChevronRight, Eye, Pencil, Plus, RefreshCw, Search, ShieldCheck, Ticket, X } from 'lucide-react';
+import { Ban, Check, ChevronLeft, ChevronRight, Eye, Pencil, Plus, RefreshCw, Search, ShieldCheck, Ticket, UserPlus, X } from 'lucide-react';
 import { useCommerce } from '../context/CommerceContext.jsx';
 import { useVoucherReadiness } from '../hooks/useVoucherReadiness.js';
 import { AdminSidebar } from '../components/AdminVoucherNavLink.jsx';
 import { EmptyState, ErrorNotice } from '../components/Feedback.jsx';
 import { safeReturnUrl } from '../utils/auth-navigation.js';
 import { BRAND_NAME } from '../config/branding.js';
+import VoucherCustomerSelector, { VoucherAssignedCustomers } from '../components/VoucherCustomerSelector.jsx';
 import '../admin-orders.css';
 import '../admin-products.css';
 import '../admin-vouchers.css';
@@ -17,6 +18,10 @@ const moneyFormat = new Intl.NumberFormat('vi-VN', { style: 'currency', currency
 const money = value => moneyFormat.format(Number(value));
 const date = value => Number.isFinite(Date.parse(value)) ? dateFormat.format(new Date(value)) : 'Chưa có thời gian';
 const amount = value => typeof value === 'string' && /^(?:0|[1-9]\d{0,9})\.\d{2}$/.test(value);
+const audienceOf = voucher => voucher?.audience === 'selected' ? 'selected' : 'all';
+const legacyVoucher = voucher => Boolean(voucher && voucher.distribution_managed !== true);
+const audienceLabel = voucher => audienceOf(voucher) === 'selected' ? 'Khách hàng được chọn' : 'Toàn bộ khách hàng';
+const distributionNotice = 'Cần nâng cấp chức năng phân phối Voucher để tạo mã mới, đổi đối tượng áp dụng hoặc cấp Voucher. Các mã và đơn hàng hiện có được giữ nguyên.';
 const validVoucher = voucher => voucher && /^[1-9]\d{0,19}$/.test(String(voucher.voucher_id)) &&
   /^[A-Z0-9][A-Z0-9_-]{0,63}$/.test(voucher.code) && ['fixed', 'percent'].includes(voucher.discount_type) &&
   amount(voucher.discount_value) && amount(voucher.minimum_order_amount) && (voucher.max_discount_amount === null || amount(voucher.max_discount_amount)) &&
@@ -33,7 +38,8 @@ function formValues(voucher) {
     starts_at_utc: localTime(voucher?.starts_at_utc || Date.now()),
     ends_at_utc: localTime(voucher?.ends_at_utc || Date.now() + 7 * 86400000),
     total_limit: voucher?.total_limit == null ? '' : String(voucher.total_limit),
-    per_user_limit: voucher?.per_user_limit == null ? '' : String(voucher.per_user_limit), status: voucher?.status || 'draft',
+    per_user_limit: voucher ? voucher.per_user_limit == null ? '' : String(voucher.per_user_limit) : '1', status: voucher?.status || 'draft',
+    audience: audienceOf(voucher),
   };
 }
 function decimal(value) {
@@ -59,11 +65,14 @@ function Dialog({ title, busy, onClose, children }) {
     {children}
   </dialog>;
 }
-function VoucherForm({ voucher, busy, error, onSave, onClose }) {
+function VoucherForm({ voucher, distributionReady, busy, error, onSave, onClose }) {
   const [original] = useState(() => voucher ? formValues(voucher) : null);
   const [values, setValues] = useState(() => formValues(voucher));
   const [errors, setErrors] = useState({});
   const [formError, setFormError] = useState('');
+  const [customers, setCustomers] = useState([]);
+  const legacy = legacyVoucher(voucher);
+  const initialCustomers = !legacy && values.audience === 'selected' && (!voucher || original.audience !== 'selected');
   const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'múi giờ thiết bị';
   const change = event => {
     const { name, value } = event.target;
@@ -75,7 +84,7 @@ function VoucherForm({ voucher, busy, error, onSave, onClose }) {
   const errorText = name => errors[name] && <small id={`admin-voucher-${name}-error`} className="admin-products-field-error">{errors[name]}</small>;
   const submit = event => {
     event.preventDefault();
-    if (busy) return;
+    if (busy || (!voucher && !distributionReady)) return;
     const nextErrors = {}, payload = {};
     const code = values.code.trim();
     if (!/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(code)) nextErrors.code = 'Nhập 1–64 chữ cái không dấu, số, dấu gạch ngang hoặc gạch dưới.';
@@ -89,10 +98,18 @@ function VoucherForm({ voucher, busy, error, onSave, onClose }) {
       payload[key] = parsed;
     }
     if (values.discount_type === 'percent' && payload.discount_value !== null && Number(payload.discount_value) > 100) nextErrors.discount_value = 'Phần trăm giảm phải lớn hơn 0 và không vượt quá 100%.';
-    for (const key of ['total_limit', 'per_user_limit']) {
-      const text = values[key].trim();
-      if (text && (!/^[1-9]\d{0,9}$/.test(text) || Number(text) > 4294967295)) nextErrors[key] = 'Nhập số nguyên từ 1 đến 4.294.967.295, hoặc để trống nếu không giới hạn.';
-      payload[key] = text ? Number(text) : null;
+    const quantity = values.total_limit.trim();
+    if ((!quantity && !legacy) || (quantity && (!/^[1-9]\d{0,9}$/.test(quantity) || Number(quantity) > 4294967295))) nextErrors.total_limit = 'Nhập số lượng Voucher là số nguyên từ 1 đến 4.294.967.295.';
+    payload.total_limit = quantity ? Number(quantity) : null;
+    // Existing vouchers retain their per-customer policy, including unlimited use.
+    if (!voucher) payload.per_user_limit = 1;
+    if (!voucher || values.audience !== original.audience) {
+      if (!distributionReady) nextErrors.audience = 'Chức năng phân phối Voucher chưa sẵn sàng.';
+      else payload.audience = values.audience;
+    }
+    if (initialCustomers) {
+      if (!customers.length || customers.length > 100) nextErrors.user_ids = 'Vui lòng chọn từ 1 đến 100 khách hàng để áp dụng mã.';
+      payload.user_ids = customers.map(customer => customer.user_id);
     }
     for (const key of ['starts_at_utc', 'ends_at_utc']) {
       const timestamp = Date.parse(values[key]);
@@ -102,16 +119,21 @@ function VoucherForm({ voucher, busy, error, onSave, onClose }) {
     if (payload.starts_at_utc && payload.ends_at_utc && Date.parse(payload.ends_at_utc) <= Date.parse(payload.starts_at_utc)) nextErrors.ends_at_utc = 'Ngày kết thúc phải sau ngày bắt đầu.';
     setErrors(nextErrors); setFormError('');
     const invalid = Object.keys(nextErrors)[0];
-    if (invalid) { event.currentTarget.elements.namedItem(invalid)?.focus(); return; }
+    if (invalid) {
+      if (invalid === 'user_ids') event.currentTarget.querySelector('[data-voucher-customer-search]')?.focus();
+      else event.currentTarget.elements.namedItem(invalid)?.focus();
+      return;
+    }
     // Preserve original timestamps/terms when the administrator edits another field.
-    const changed = original ? Object.fromEntries(Object.entries(payload).filter(([key]) => values[key] !== original[key])) : payload;
+    const changed = original ? Object.fromEntries(Object.entries(payload).filter(([key]) => key === 'user_ids' || values[key] !== original[key])) : payload;
     if (!Object.keys(changed).length) { setFormError('Bạn chưa thay đổi thông tin nào.'); return; }
     onSave(changed, voucher);
   };
   const moneyField = (name, label, optional = false) => <label className="admin-products-field" htmlFor={`admin-voucher-${name}`}><span>{label}{optional ? '' : ' *'}</span><input {...field(name)} type="text" inputMode="decimal" autoComplete="off" placeholder={optional ? 'Không giới hạn' : '0.00'} required={!optional} />{optional && <small>Để trống nếu không giới hạn.</small>}{errorText(name)}</label>;
   return <Dialog title={voucher ? `Sửa Voucher ${voucher.code}` : 'Tạo Voucher mới'} busy={busy} onClose={onClose}>
     <form className="admin-products-form" noValidate onSubmit={submit}>
-      <fieldset disabled={busy}><legend className="sr-only">Thông tin Voucher</legend><div className="admin-products-form-grid">
+      {!distributionReady && <p className="admin-vouchers-upgrade" role="status">{distributionNotice}</p>}
+      <fieldset disabled={busy || (!voucher && !distributionReady)}><legend className="sr-only">Thông tin Voucher</legend><div className="admin-products-form-grid">
         <label className="admin-products-field" htmlFor="admin-voucher-code"><span>Mã Voucher *</span><input {...field('code')} maxLength={64} required autoFocus autoComplete="off" autoCapitalize="characters" spellCheck={false} /><small>Mã không được đổi sau khi đã có đơn sử dụng.</small>{errorText('code')}</label>
         <label className="admin-products-field" htmlFor="admin-voucher-status"><span>Trạng thái</span><select {...field('status')}>{Object.entries(STATUSES).filter(([status]) => status !== 'disabled' || voucher?.status === 'disabled').map(([status, label]) => <option key={status} value={status}>{label}</option>)}</select><small>Để vô hiệu hóa mã, dùng nút Vô hiệu hóa trong danh sách và xác nhận thao tác.</small>{errorText('status')}</label>
         <label className="admin-products-field" htmlFor="admin-voucher-discount_type"><span>Loại giảm giá</span><select {...field('discount_type')}><option value="percent">Theo phần trăm (%)</option><option value="fixed">Số tiền cố định (đ)</option></select></label>
@@ -121,30 +143,53 @@ function VoucherForm({ voucher, busy, error, onSave, onClose }) {
         <label className="admin-products-field" htmlFor="admin-voucher-starts_at_utc"><span>Ngày bắt đầu *</span><input {...field('starts_at_utc')} type="datetime-local" step="0.001" required />{errorText('starts_at_utc')}</label>
         <label className="admin-products-field" htmlFor="admin-voucher-ends_at_utc"><span>Ngày kết thúc *</span><input {...field('ends_at_utc')} type="datetime-local" step="0.001" required />{errorText('ends_at_utc')}</label>
         <p className="admin-vouchers-timezone admin-products-field-wide">Ngày và giờ theo múi giờ thiết bị: {timezone}. Voucher ngừng áp dụng từ thời điểm kết thúc.</p>
-        {['total_limit', 'per_user_limit'].map(name => <label key={name} className="admin-products-field" htmlFor={`admin-voucher-${name}`}><span>{name === 'total_limit' ? 'Tổng lượt sử dụng' : 'Giới hạn mỗi khách'}</span><input {...field(name)} type="text" inputMode="numeric" placeholder="Không giới hạn" autoComplete="off" /><small>Để trống nếu không giới hạn lượt.</small>{errorText(name)}</label>)}
+        <label className="admin-products-field" htmlFor="admin-voucher-total_limit"><span>Số lượng Voucher{legacy ? '' : ' *'}</span><input {...field('total_limit')} type="text" inputMode="numeric" maxLength={10} placeholder={legacy ? 'Không giới hạn (mã cũ)' : 'Ví dụ: 100'} autoComplete="off" required={!legacy} /><small>Một mã dùng chung với số lượt tương ứng; nhập 100 nghĩa là 100 lượt sử dụng, không tạo 100 mã khác nhau.{legacy && ' Để trống để giữ số lượng không giới hạn của mã cũ.'}</small>{errorText('total_limit')}</label>
+        <div className="admin-products-field"><span>Giới hạn mỗi khách</span><p className="admin-vouchers-fixed-policy">{legacy ? voucher.per_user_limit === null ? 'Không giới hạn (chính sách mã cũ)' : `${voucher.per_user_limit} lượt / khách (chính sách mã cũ)` : 'Mỗi khách được dùng tối đa 1 lần'}</p><small>{legacy ? 'Giữ nguyên giới hạn hiện tại khi chỉnh sửa mã này.' : 'Giới hạn được kiểm tra khi áp dụng và đặt hàng.'}</small></div>
+        <label className="admin-products-field admin-products-field-wide" htmlFor="admin-voucher-audience"><span>Đối tượng áp dụng</span><select {...field('audience')} disabled={!distributionReady || legacy}><option value="all">Toàn bộ khách hàng</option><option value="selected">Khách hàng được chọn</option></select><small>{legacy ? 'Voucher cũ giữ nguyên đối tượng và giới hạn; dùng Cấp Voucher để đưa mã vào ví khách.' : <>{values.audience === 'all' ? 'Mọi khách hàng đủ điều kiện có thể dùng mã, trong số lượng còn lại.' : 'Chỉ những khách hàng được cấp mã mới có thể sử dụng.'} {voucher && 'Chỉ đổi đối tượng khi mã chưa từng được dùng cho đơn hàng.'}</>}</small>{errorText('audience')}</label>
+        {initialCustomers && distributionReady && <div className="admin-products-field-wide"><VoucherCustomerSelector value={customers} onChange={selected => { setCustomers(selected); setErrors(previous => ({ ...previous, user_ids: '' })); }} disabled={busy} error={errors.user_ids} /></div>}
+        {voucher && values.audience === 'selected' && !initialCustomers && <p className="admin-vouchers-timezone admin-products-field-wide">Danh sách đã cấp được giữ nguyên. Dùng “Cấp Voucher” để cấp thêm cho khách hàng.</p>}
       </div></fieldset>
       {(formError || error) && <p className="admin-products-form-error" role="alert">{formError || error}</p>}
-      <div className="admin-products-dialog-actions"><button className="button button-outline" type="button" disabled={busy} onClick={onClose}>Hủy</button><button className="button button-primary" type="submit" disabled={busy}>{busy ? 'Đang lưu...' : voucher ? 'Lưu thay đổi' : 'Tạo Voucher'}</button></div>
+      <div className="admin-products-dialog-actions"><button className="button button-outline" type="button" disabled={busy} onClick={onClose}>Hủy</button><button className="button button-primary" type="submit" disabled={busy || (!voucher && !distributionReady)}>{busy ? 'Đang lưu...' : voucher ? 'Lưu thay đổi' : 'Tạo Voucher'}</button></div>
     </form>
   </Dialog>;
 }
-function VoucherDetails({ voucher, onClose, onEdit }) {
+function VoucherDetails({ voucher, distributionReady, onClose, onEdit, onGrant }) {
   const entries = [['Mã Voucher', voucher.code], ['Loại giảm giá', voucher.discount_type === 'percent' ? 'Theo phần trăm' : 'Số tiền cố định'],
     ['Giá trị giảm', voucher.discount_type === 'percent' ? `${voucher.discount_value}%` : money(voucher.discount_value)],
     ['Đơn tối thiểu', money(voucher.minimum_order_amount)], ['Giảm tối đa', voucher.max_discount_amount === null ? 'Không giới hạn' : money(voucher.max_discount_amount)],
     ['Ngày bắt đầu', date(voucher.starts_at_utc)], ['Ngày kết thúc', date(voucher.ends_at_utc)],
-    ['Tổng lượt sử dụng', voucher.total_limit === null ? 'Không giới hạn' : voucher.total_limit],
+    ['Số lượng Voucher', voucher.total_limit === null ? 'Không giới hạn (mã cũ)' : `${voucher.total_limit} lượt dùng chung`],
+    ['Đối tượng áp dụng', audienceLabel(voucher)],
     ['Giới hạn mỗi khách', voucher.per_user_limit === null ? 'Không giới hạn' : voucher.per_user_limit], ['Trạng thái', STATUSES[voucher.status]]];
   return <Dialog title={`Chi tiết Voucher ${voucher.code}`} busy={false} onClose={onClose}>
     <dl className="admin-vouchers-details">{entries.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}</dl>
     <p className="admin-vouchers-timezone">Thời gian hiển thị theo múi giờ thiết bị. Thay đổi Voucher chỉ áp dụng cho đơn mới.</p>
-    <div className="admin-products-dialog-actions"><button className="button button-outline" type="button" onClick={onClose}>Đóng</button><button className="button button-primary" type="button" onClick={() => onEdit(voucher)}><Pencil size={15} aria-hidden="true" />Chỉnh sửa</button></div>
+    {distributionReady && <VoucherAssignedCustomers key={voucher.voucher_id} voucherId={voucher.voucher_id} />}
+    <div className="admin-products-dialog-actions"><button className="button button-outline" type="button" onClick={onClose}>Đóng</button><button className="button button-outline" type="button" disabled={!distributionReady || voucher.status === 'disabled'} onClick={() => onGrant(voucher)}><UserPlus size={15} aria-hidden="true" />Cấp Voucher</button><button className="button button-primary" type="button" onClick={() => onEdit(voucher)}><Pencil size={15} aria-hidden="true" />Chỉnh sửa</button></div>
   </Dialog>;
 }
-function VoucherList() {
-  const { getAdminVouchers, getAdminVoucher, createAdminVoucher, updateAdminVoucher, disableAdminVoucher } = useCommerce();
+function GrantVoucherDialog({ voucher, distributionReady, busy, error, onClose, onGrant }) {
+  const [customers, setCustomers] = useState([]);
+  const [selectionError, setSelectionError] = useState('');
+  return <Dialog title={`Cấp Voucher ${voucher.code}`} busy={busy} onClose={onClose}>
+    <form className="admin-products-form" noValidate onSubmit={event => {
+      event.preventDefault();
+      if (busy || !distributionReady) return;
+      if (!customers.length || customers.length > 100) { setSelectionError('Vui lòng chọn từ 1 đến 100 khách hàng.'); event.currentTarget.querySelector('[data-voucher-customer-search]')?.focus(); return; }
+      onGrant(customers.map(customer => customer.user_id), voucher);
+    }}>
+      <p className="admin-vouchers-grant-intro">{audienceOf(voucher) === 'all' ? 'Cấp mã vào “Voucher của tôi” cho khách được chọn; mã vẫn áp dụng cho tất cả khách hàng đủ điều kiện.' : 'Khách được cấp sẽ thấy mã trong “Voucher của tôi” và có thể dùng nếu đủ điều kiện.'} Cấp lại cùng mã cho một khách không tạo bản cấp trùng và không làm tăng số lượng Voucher.</p>
+      {!distributionReady ? <p className="admin-vouchers-upgrade" role="status">{distributionNotice}</p> : <><VoucherCustomerSelector value={customers} onChange={selected => { setCustomers(selected); setSelectionError(''); }} disabled={busy} error={selectionError} /><VoucherAssignedCustomers voucherId={voucher.voucher_id} disabled={busy} /></>}
+      {error && <p className="admin-products-form-error" role="alert">{error}</p>}
+      <div className="admin-products-dialog-actions"><button className="button button-outline" type="button" disabled={busy} onClick={onClose}>Hủy</button><button className="button button-primary" type="submit" disabled={busy || !distributionReady || !customers.length}><UserPlus size={15} aria-hidden="true" />{busy ? 'Đang cấp...' : `Cấp cho ${customers.length} khách`}</button></div>
+    </form>
+  </Dialog>;
+}
+function VoucherList({ distributionReady, onCheckReadiness }) {
+  const { getAdminVouchers, getAdminVoucher, createAdminVoucher, updateAdminVoucher, disableAdminVoucher, grantAdminVoucher } = useCommerce();
   const methods = useRef({});
-  methods.current = { getAdminVouchers, getAdminVoucher, createAdminVoucher, updateAdminVoucher, disableAdminVoucher };
+  methods.current = { getAdminVouchers, getAdminVoucher, createAdminVoucher, updateAdminVoucher, disableAdminVoucher, grantAdminVoucher };
   const [query, setQuery] = useState({ q: '', status: '', page: 1 });
   const [draft, setDraft] = useState({ q: '', status: '' });
   const [revision, setRevision] = useState(0);
@@ -192,6 +237,7 @@ function VoucherList() {
   };
   const mutate = async (kind, payload, voucher) => {
     if (busyRef.current) return;
+    if (kind !== 'disable' && !distributionReady && (!voucher || Object.hasOwn(payload, 'audience') || Object.hasOwn(payload, 'user_ids'))) { setActionError('Chức năng phân phối Voucher chưa sẵn sàng. Vui lòng kiểm tra lại.'); return; }
     busyRef.current = true; setBusy(true); setActionError(''); setSuccess('');
     try {
       const saved = kind === 'disable' ? await methods.current.disableAdminVoucher(voucher.voucher_id) : voucher ? await methods.current.updateAdminVoucher(voucher.voucher_id, payload) : await methods.current.createAdminVoucher(payload);
@@ -203,6 +249,19 @@ function VoucherList() {
       if (alive.current && !error.obsolete) setActionError((error.message || 'Chưa lưu được Voucher. Vui lòng thử lại.') + (!error.status && !voucher ? ' Hãy tải lại danh sách để kiểm tra trước khi tạo lại.' : ''));
     } finally { busyRef.current = false; if (alive.current) setBusy(false); }
   };
+  const grant = async (userIds, voucher) => {
+    if (busyRef.current || !distributionReady) return;
+    busyRef.current = true; setBusy(true); setActionError(''); setSuccess('');
+    try {
+      const result = await methods.current.grantAdminVoucher(voucher.voucher_id, userIds);
+      if (!alive.current) return;
+      if (!validVoucher(result.voucher) || String(result.voucher.voucher_id) !== String(voucher.voucher_id) || !Number.isSafeInteger(result.added) || result.added < 0 || result.added > userIds.length) throw new Error('Chưa xác nhận được kết quả cấp. Hãy đóng hộp thoại và tải lại danh sách khách đã được cấp trước khi thử lại.');
+      setSuccess(result.added ? `Đã cấp Voucher ${voucher.code} cho ${result.added} khách hàng mới. Khách đã có mã được giữ nguyên.` : `Các khách đã chọn đều đã được cấp Voucher ${voucher.code}; không tạo bản cấp trùng.`);
+      setDialog(null); setRevision(value => value + 1);
+    } catch (error) {
+      if (alive.current && !error.obsolete) setActionError(error.message || 'Chưa cấp được Voucher. Vui lòng thử lại.');
+    } finally { busyRef.current = false; if (alive.current) setBusy(false); }
+  };
   const reset = () => { if (!busyRef.current) { setDraft({ q: '', status: '' }); setFilterError(''); setQuery({ q: '', status: '', page: 1 }); } };
   const apply = event => {
     event.preventDefault();
@@ -211,6 +270,7 @@ function VoucherList() {
     setFilterError(''); setQuery({ q: draft.q.trim().toUpperCase(), status: draft.status, page: 1 });
   };
   return <>
+    {!distributionReady && <div className="admin-vouchers-upgrade" role="status"><p>{distributionNotice}</p><button className="button button-outline" type="button" disabled={busy} onClick={onCheckReadiness}><RefreshCw size={15} aria-hidden="true" />Kiểm tra lại</button></div>}
     {success && <p className="admin-orders-success" role="status"><Check size={18} aria-hidden="true" />{success}</p>}
     {!dialog && actionError && <p className="admin-products-form-error" role="alert">{actionError}</p>}
     <form className="admin-products-filters admin-vouchers-filters" noValidate onSubmit={apply} aria-label="Tìm kiếm và lọc Voucher">
@@ -219,22 +279,23 @@ function VoucherList() {
       <div className="admin-products-filter-actions"><button className="button button-primary" type="submit" disabled={busy}><Search size={15} aria-hidden="true" />Áp dụng</button><button className="button button-outline" type="button" disabled={busy} onClick={reset}>Xóa bộ lọc</button></div>
     </form>
     {filterError && <p className="admin-products-form-error" role="alert">{filterError}</p>}
-    <div className="admin-products-list-heading"><p aria-live="polite">{loading ? 'Đang tải danh sách...' : current.error ? 'Chưa tải được danh sách' : `${current.total} Voucher${hasFilters ? ' phù hợp bộ lọc' : ''}`}</p><div className="admin-products-heading-actions"><button className="button button-outline" type="button" disabled={busy || loading} onClick={reload}><RefreshCw size={15} aria-hidden="true" />Tải lại</button><button className="button button-primary" type="button" disabled={busy} onClick={() => open({ kind: 'form', voucher: null })}><Plus size={17} aria-hidden="true" />Tạo Voucher</button></div></div>
+    <div className="admin-products-list-heading"><p aria-live="polite">{loading ? 'Đang tải danh sách...' : current.error ? 'Chưa tải được danh sách' : `${current.total} Voucher${hasFilters ? ' phù hợp bộ lọc' : ''}`}</p><div className="admin-products-heading-actions"><button className="button button-outline" type="button" disabled={busy || loading} onClick={reload}><RefreshCw size={15} aria-hidden="true" />Tải lại</button><button className="button button-primary" type="button" disabled={busy || !distributionReady} onClick={() => open({ kind: 'form', voucher: null })}><Plus size={17} aria-hidden="true" />Tạo Voucher</button></div></div>
     {loading ? <Loading /> : current.error ? <ErrorNotice title="Chưa tải được Voucher" message={current.error} onRetry={reload} /> : !current.vouchers.length ? <EmptyState title={hasFilters ? 'Chưa có Voucher phù hợp' : 'Chưa có Voucher'} message={hasFilters ? 'Thử mã khác hoặc thay đổi bộ lọc trạng thái.' : 'Tạo Voucher đầu tiên để bắt đầu chương trình ưu đãi.'} onReset={hasFilters ? reset : undefined} /> : <>
       <div className="admin-products-table-wrap"><table className="admin-products-table"><caption className="sr-only">Danh sách Voucher quản trị</caption><thead><tr><th scope="col">Mã Voucher</th><th scope="col">Loại / giá trị</th><th scope="col">Thời hạn</th><th scope="col">Giới hạn sử dụng</th><th scope="col">Trạng thái</th><th scope="col">Thao tác</th></tr></thead><tbody>{current.vouchers.map(voucher => <tr key={voucher.voucher_id} data-voucher-id={voucher.voucher_id}>
-        <td data-label="Mã Voucher"><strong className="admin-vouchers-code">{voucher.code}</strong><small className="admin-vouchers-subtext">Đơn từ {money(voucher.minimum_order_amount)}</small></td>
+        <td data-label="Mã Voucher"><strong className="admin-vouchers-code">{voucher.code}</strong><small className="admin-vouchers-subtext">Đơn từ {money(voucher.minimum_order_amount)}</small><small className="admin-vouchers-subtext">{audienceLabel(voucher)}</small></td>
         <td data-label="Loại / giá trị"><strong>{voucher.discount_type === 'percent' ? `${voucher.discount_value}%` : money(voucher.discount_value)}</strong><small className="admin-vouchers-subtext">{voucher.discount_type === 'percent' ? 'Theo phần trăm' : 'Số tiền cố định'}{voucher.max_discount_amount === null ? '' : ` · Tối đa ${money(voucher.max_discount_amount)}`}</small></td>
         <td data-label="Thời hạn"><span>{date(voucher.starts_at_utc)}</span><small className="admin-vouchers-subtext">đến {date(voucher.ends_at_utc)}</small></td>
-        <td data-label="Giới hạn"><span>Tổng: {voucher.total_limit ?? 'Không giới hạn'}</span><small className="admin-vouchers-subtext">Mỗi khách: {voucher.per_user_limit ?? 'Không giới hạn'}</small></td>
+        <td data-label="Giới hạn"><span>Số lượng Voucher: {voucher.total_limit ?? 'Không giới hạn'}</span><small className="admin-vouchers-subtext">Mỗi khách: {voucher.per_user_limit ?? 'Không giới hạn'}{legacyVoucher(voucher) ? ' (mã cũ)' : ' lần'}</small></td>
         <td data-label="Trạng thái"><span className={`admin-products-badge admin-vouchers-status-${voucher.status}`}>{STATUSES[voucher.status]}</span></td>
-        <td data-label="Thao tác"><div className="admin-products-row-actions"><button className="button button-outline" type="button" disabled={busy} aria-label={`Xem Voucher ${voucher.code}`} onClick={() => loadVoucher(voucher, 'detail')}><Eye size={14} aria-hidden="true" />Xem</button><button className="button button-outline" type="button" disabled={busy} aria-label={`Sửa Voucher ${voucher.code}`} onClick={() => loadVoucher(voucher, 'form')}><Pencil size={14} aria-hidden="true" />Sửa</button><button className="button admin-orders-button-danger-outline" type="button" disabled={busy || voucher.status === 'disabled'} aria-label={`Vô hiệu hóa Voucher ${voucher.code}`} onClick={() => open({ kind: 'disable', voucher })}><Ban size={14} aria-hidden="true" />Vô hiệu hóa</button></div></td>
+        <td data-label="Thao tác"><div className="admin-products-row-actions"><button className="button button-outline" type="button" disabled={busy} aria-label={`Xem Voucher ${voucher.code}`} onClick={() => loadVoucher(voucher, 'detail')}><Eye size={14} aria-hidden="true" />Xem</button><button className="button button-outline" type="button" disabled={busy} aria-label={`Sửa Voucher ${voucher.code}`} onClick={() => loadVoucher(voucher, 'form')}><Pencil size={14} aria-hidden="true" />Sửa</button><button className="button button-outline" type="button" disabled={busy || !distributionReady || voucher.status === 'disabled'} aria-label={`Cấp Voucher ${voucher.code}`} onClick={() => loadVoucher(voucher, 'grant')}><UserPlus size={14} aria-hidden="true" />Cấp Voucher</button><button className="button admin-orders-button-danger-outline" type="button" disabled={busy || voucher.status === 'disabled'} aria-label={`Vô hiệu hóa Voucher ${voucher.code}`} onClick={() => open({ kind: 'disable', voucher })}><Ban size={14} aria-hidden="true" />Vô hiệu hóa</button></div></td>
       </tr>)}</tbody></table></div>
       <div className="admin-orders-pagination"><p>Trang {query.page} / {Math.max(1, Math.ceil(current.total / PAGE_SIZE))} · {current.total} Voucher</p><div><button className="button button-outline" type="button" disabled={busy || query.page <= 1} onClick={() => setQuery(previous => ({ ...previous, page: previous.page - 1 }))}><ChevronLeft size={16} aria-hidden="true" />Trang trước</button><button className="button button-outline" type="button" disabled={busy || query.page * PAGE_SIZE >= current.total} onClick={() => setQuery(previous => ({ ...previous, page: previous.page + 1 }))}>Trang sau<ChevronRight size={16} aria-hidden="true" /></button></div></div>
     </>}
-    <p className="admin-vouchers-rule">Lượt đã giữ cho đơn hàng cũng được tính vào giới hạn. Cập nhật Voucher không đổi số tiền của đơn cũ.</p>
+    <p className="admin-vouchers-rule">Số lượng Voucher là số lượt sử dụng của một mã chung. Cấp mã cho khách không tạo thêm mã hoặc tăng số lượng. Lượt đã giữ cho đơn hàng cũng được tính vào giới hạn; cập nhật mã không đổi số tiền của đơn cũ.</p>
     {dialog?.kind === 'loading' && <Dialog title="Đang tải chi tiết Voucher" busy={true} onClose={close}><Loading /></Dialog>}
-    {dialog?.kind === 'form' && <VoucherForm key={dialog.voucher?.voucher_id || 'new'} voucher={dialog.voucher} busy={busy} error={actionError} onSave={(payload, voucher) => mutate('save', payload, voucher)} onClose={close} />}
-    {dialog?.kind === 'detail' && <VoucherDetails voucher={dialog.voucher} onClose={close} onEdit={voucher => open({ kind: 'form', voucher })} />}
+    {dialog?.kind === 'form' && <VoucherForm key={dialog.voucher?.voucher_id || 'new'} voucher={dialog.voucher} distributionReady={distributionReady} busy={busy} error={actionError} onSave={(payload, voucher) => mutate('save', payload, voucher)} onClose={close} />}
+    {dialog?.kind === 'detail' && <VoucherDetails voucher={dialog.voucher} distributionReady={distributionReady} onClose={close} onEdit={voucher => open({ kind: 'form', voucher })} onGrant={voucher => open({ kind: 'grant', voucher })} />}
+    {dialog?.kind === 'grant' && <GrantVoucherDialog key={dialog.voucher.voucher_id} voucher={dialog.voucher} distributionReady={distributionReady} busy={busy} error={actionError} onClose={close} onGrant={grant} />}
     {dialog?.kind === 'disable' && <Dialog title="Vô hiệu hóa Voucher" busy={busy} onClose={close}>
       <div className="admin-products-stop-copy"><p>Vô hiệu hóa mã <strong>{dialog.voucher.code}</strong>?</p><p>Khách hàng sẽ không thể áp dụng mã cho đơn mới. Các đơn đã sử dụng mã được giữ nguyên.</p></div>
       {actionError && <p className="admin-products-form-error" role="alert">{actionError}</p>}
@@ -247,7 +308,7 @@ function VoucherWorkspace() {
   if (readiness.loading) return <Loading label="Đang kiểm tra Voucher" />;
   if (readiness.error) return <ErrorNotice title="Chưa kiểm tra được Voucher" message="Chưa nhận được trạng thái Voucher từ máy chủ. Vui lòng thử lại sau." onRetry={readiness.retry} />;
   if (!readiness.ready) return <section className="admin-orders-state admin-vouchers-unavailable"><Ticket size={36} aria-hidden="true" /><h2>Voucher chưa khả dụng</h2><p>Chức năng quản lý Voucher hiện chưa được mở. Vui lòng quay lại sau.</p><button className="button button-outline" type="button" onClick={readiness.retry}><RefreshCw size={16} aria-hidden="true" />Kiểm tra lại</button></section>;
-  return <VoucherList />;
+  return <VoucherList distributionReady={readiness.distributionReady === true} onCheckReadiness={readiness.retry} />;
 }
 export default function AdminVouchersPage() {
   const { user, authLoading } = useCommerce();

@@ -7,17 +7,24 @@ const router = express.Router();
 const readiness = require('../services/voucher-readiness').createVoucherReadiness();
 router.get('/readiness', handle(async (req, res) => {
     res.set('Cache-Control', 'no-store');
-    res.json({ success: true, readiness: await readiness() });
+    const state = await readiness();
+    let distributionReady = false;
+    if (state.ready) {
+        try { distributionReady = await vouchers.distributionReady(); }
+        catch { /* Keep discovery private; write boundaries verify schema again. */ }
+    }
+    res.json({ success: true, readiness: { ...state, distribution_ready: distributionReady } });
 }));
 router.use(authenticate, authorize('user'));
 router.use(featureGate(config.assertEnabled));
 
 router.get('/', handle(async (req, res) => {
-    if (Object.keys(req.query).some(key => !['page', 'limit'].includes(key))) bad('Unsupported voucher list parameters');
+    if (Object.keys(req.query).some(key => !['page', 'limit', 'assigned'].includes(key))) bad('Unsupported voucher list parameters');
     const filters = pagination(req.query);
     if (filters.limit > 50) bad('Voucher list limit must not exceed 50');
+    if (req.query.assigned !== undefined && req.query.assigned !== '1') bad('assigned must be 1 when requesting personal vouchers');
     res.set('Cache-Control', 'no-store');
-    res.json({ success: true, ...filters, ...await vouchers.listForCustomer(req.user.user_id, filters) });
+    res.json({ success: true, ...filters, ...await vouchers.listForCustomer(req.user.user_id, { ...filters, assignedOnly: req.query.assigned === '1' }) });
 }));
 
 router.post('/quote', handle(async (req, res) => {

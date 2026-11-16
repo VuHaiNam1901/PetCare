@@ -1,0 +1,23 @@
+.my-vouchers-state { display: flex; flex-direction: column; align-items: center; gap: 14px; padding: 46px 24px; border: 1px solid var(--color-border); border-radius: 8px; background: #fff; text-align: center; }
+.my-vouchers-state > svg { color: var(--color-primary-hover); }
+.my-vouchers-state h2 { font-size: 19px; }
+.my-vouchers-state p { max-width: 480px; color: var(--color-muted); font-size: 12px; }
+.my-vouchers-count, .my-vouchers-note { color: var(--color-muted); font-size: 11px; }
+.my-vouchers-count { margin-bottom: 14px; }
+.my-vouchers-note { margin-top: 18px; line-height: 1.8; }
+.my-vouchers-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; margin: 0; padding: 0; list-style: none; }
+.my-voucher-card { display: flex; flex-direction: column; gap: 14px; min-width: 0; padding: 20px; border: 1px solid var(--color-border); border-radius: 8px; background: #fff; }
+.my-voucher-card-heading { display: flex; align-items: center; gap: 10px; color: var(--color-primary-hover); }
+.my-voucher-card-heading > svg { flex-shrink: 0; }
+.my-voucher-card code { font-family: inherit; font-size: 15px; font-weight: 700; overflow-wrap: anywhere; user-select: all; }
+.my-voucher-card h2 { font-size: 20px; }
+.my-voucher-card dl { display: flex; flex-direction: column; gap: 7px; margin: 0 0 auto; font-size: 11px; }
+.my-voucher-card dl > div { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
+.my-voucher-card dt { color: var(--color-muted); }
+.my-voucher-card dd { margin: 0; text-align: right; }
+.my-voucher-card > button { align-self: flex-start; }
+@media (max-width: 620px) {
+  .my-vouchers-list { grid-template-columns: minmax(0, 1fr); }
+  .my-voucher-card { padding: 18px; }
+  .my-vouchers-state { padding: 32px 18px; }
+}

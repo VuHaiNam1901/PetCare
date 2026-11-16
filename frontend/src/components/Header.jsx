@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { ChevronDown, ClipboardList, Compass, ContactRound, FolderTree, Heart, LogOut, Mail, Menu, Package, Phone, Search, ShoppingCart, TicketPercent, Truck, UserRound, Users, X } from 'lucide-react';
-import Logo from './Logo.jsx';
+import logoIcon from '../assets/logoshop.png';
+import logoWordmark from '../assets/chulogo.png';
+import { BRAND_NAME } from '../config/branding.js';
 import { useCommerce } from '../context/CommerceContext.jsx';
 import { useWishlist } from '../context/WishlistContext.jsx';
 import { useVoucherReadiness } from '../hooks/useVoucherReadiness.js';
@@ -40,11 +42,11 @@ export default function Header({ query, onQueryChange, categories, onCategoryCha
   const productSubpage = isProductDetailPage || isProductReviewsPage;
   const inProducts = isProductsPage || productSubpage;
   const currentPath = window.location.pathname.replace(/\/+$/, '');
-  const otherPage = ['/cart', '/checkout', '/login', '/register', '/my-orders', '/wishlist', '/profile', '/admin/orders', '/admin/products', '/admin/categories', '/admin/users', '/admin/vouchers'].includes(currentPath) || currentPath.startsWith('/my-orders/') || currentPath.startsWith('/admin/orders/');
+  const otherPage = ['/cart', '/checkout', '/login', '/register', '/my-orders', '/my-vouchers', '/wishlist', '/profile', '/admin/orders', '/admin/products', '/admin/categories', '/admin/users', '/admin/vouchers'].includes(currentPath) || currentPath.startsWith('/my-orders/') || currentPath.startsWith('/admin/orders/');
   const leavePage = productSubpage || otherPage;
   const homeHref = inProducts || otherPage ? '/#trang-chu' : '#trang-chu';
   const accountHref = user ? user.role === 'user' ? '/my-orders' : '/admin/orders' : '/login';
-  const mobileLinks = [[homeHref, 'Trang chủ'], [leavePage ? '/products#danh-muc' : '#danh-muc', 'Danh mục'], ['/products', 'Sản phẩm'], ['/cart', 'Giỏ hàng'], ...(user ? [['/profile', 'Thông tin cá nhân'], ...(user.role === 'user' ? [['/my-orders', 'Đơn hàng của tôi'], ['/wishlist', 'Sản phẩm yêu thích']] : [])] : [['/login', 'Đăng nhập / Đăng ký']]), ['#ve-petcare', 'Về PetCare'], ['#lien-he', 'Liên hệ']];
+  const mobileLinks = [[homeHref, 'Trang chủ'], [leavePage ? '/products#danh-muc' : '#danh-muc', 'Danh mục'], ['/products', 'Sản phẩm'], ['/cart', 'Giỏ hàng'], ...(user ? [['/profile', 'Thông tin cá nhân'], ...(user.role === 'user' ? [['/my-orders', 'Đơn hàng của tôi'], ...(vouchersReady ? [['/my-vouchers', 'Voucher của tôi']] : []), ['/wishlist', 'Sản phẩm yêu thích']] : [])] : [['/login', 'Đăng nhập / Đăng ký']]), ['#ve-petcare', 'Về PetCare'], ['#lien-he', 'Liên hệ']];
   const showProducts = () => {
     if (leavePage) {
       window.location.assign(query.trim() ? `/products?q=${encodeURIComponent(query)}` : '/products');
@@ -59,7 +61,10 @@ export default function Header({ query, onQueryChange, categories, onCategoryCha
         <div className="contact-strip-links"><a href="#ve-petcare">Về PetCareShop</a><a href="#lien-he">Liên hệ</a></div>
       </div></div>
       <div className="container header-inner">
-        <Logo />
+        <a className="logo header-logo" href="/#trang-chu" aria-label={`${BRAND_NAME} — Trang chủ`}>
+          <img className="header-logo-icon" src={logoIcon} alt="" width={1024} height={765} />
+          <img className="header-logo-wordmark" src={logoWordmark} alt={BRAND_NAME} width={1024} height={318} />
+        </a>
         <form className="header-search" role="search" onSubmit={event => { event.preventDefault(); showProducts(); }}>
           <input type="search" aria-label="Tìm kiếm sản phẩm" placeholder="Tìm kiếm sản phẩm cho thú cưng..." value={query} onChange={event => onQueryChange(event.target.value)} />
           {query && <button className="clear-search" type="button" aria-label="Xóa tìm kiếm" onClick={() => onQueryChange('')}><X size={16} /></button>}
@@ -162,6 +167,10 @@ export default function Header({ query, onQueryChange, categories, onCategoryCha
                       <Heart size={16} aria-hidden="true" />
                       <span>Sản phẩm yêu thích</span>
                     </a>
+                    {vouchersReady && <a className="account-menu-item" href="/my-vouchers" aria-current={currentPath === '/my-vouchers' ? 'page' : undefined} onClick={() => setAccountOpen(false)}>
+                      <TicketPercent size={16} aria-hidden="true" />
+                      <span>Voucher của tôi</span>
+                    </a>}
                     </>
                   )}
                   <hr className="account-menu-divider" />
@@ -194,7 +203,7 @@ export default function Header({ query, onQueryChange, categories, onCategoryCha
         {categories.map((category, index) => <a key={category.category_id} href={leavePage ? `/products?category=${category.category_id}` : '#san-pham'} onClick={leavePage ? undefined : () => onCategoryChange(String(category.category_id))}>{category.name}{index < 2 && <ChevronDown size={13} />}</a>)}
         <a href="#lien-he">Liên hệ</a>
       </nav></div>
-      {menuOpen && <nav id="mobile-menu" className="mobile-nav" aria-label="Điều hướng trên điện thoại">{mobileLinks.map(([href, label]) => <a key={label} href={href} aria-current={['/profile', '/admin/products', '/admin/categories', '/admin/users', '/admin/vouchers'].includes(href) && currentPath === href ? 'page' : href === '/products' && inProducts ? (productSubpage ? 'location' : 'page') : !inProducts && !otherPage && href === homeHref ? 'page' : undefined} onClick={() => { if (href === '/login') beginLogin(); setMenuOpen(false); }}>{label}</a>)}</nav>}
+      {menuOpen && <nav id="mobile-menu" className="mobile-nav" aria-label="Điều hướng trên điện thoại">{mobileLinks.map(([href, label]) => <a key={label} href={href} aria-current={['/profile', '/my-vouchers', '/admin/products', '/admin/categories', '/admin/users', '/admin/vouchers'].includes(href) && currentPath === href ? 'page' : href === '/products' && inProducts ? (productSubpage ? 'location' : 'page') : !inProducts && !otherPage && href === homeHref ? 'page' : undefined} onClick={() => { if (href === '/login') beginLogin(); setMenuOpen(false); }}>{label}</a>)}</nav>}
     </header>
   );
 }

@@ -2,8 +2,10 @@
 
 const math = require('../services/voucher-math');
 const config = require('../config/vouchers');
+const access = require('./voucher-access');
 const fields = ['code', 'discount_type', 'discount_value', 'max_discount_amount', 'minimum_order_amount',
     'starts_at_utc', 'ends_at_utc', 'total_limit', 'per_user_limit', 'status'];
+const distributionFields = ['audience', 'user_ids'];
 const statuses = ['draft', 'active', 'disabled'];
 const selectVoucher = `CAST(v.voucher_id AS CHAR) AS voucher_id,v.code,v.discount_type,v.discount_value,
     v.max_discount_amount,v.minimum_order_amount,v.starts_at_utc,v.ends_at_utc,v.total_limit,v.per_user_limit,v.status,v.created_at_utc,v.updated_at_utc`;
@@ -32,14 +34,18 @@ function utc(value, name) {
     return normalized;
 }
 const sqlUtc = value => value.slice(0, 23).replace('T', ' ');
-function validate(value, partial = false) {
-    if (!value || typeof value !== 'object' || Array.isArray(value) || Object.keys(value).some(key => !fields.includes(key)) ||
+function validate(value, partial = false, newVoucher = false) {
+    if (!value || typeof value !== 'object' || Array.isArray(value) || Object.keys(value).some(key => !fields.includes(key) && !distributionFields.includes(key)) ||
         (partial && !Object.keys(value).length)) fail(400, 'Unsupported or empty voucher fields');
     const result = {};
     if (!partial) Object.assign(result, { max_discount_amount: null, minimum_order_amount: '0.00', total_limit: null, per_user_limit: null, status: 'draft' });
-    for (const key of fields) if (Object.hasOwn(value, key)) {
+    for (const key of [...fields, ...distributionFields]) if (Object.hasOwn(value, key)) {
         const item = value[key];
         if (key === 'code') result[key] = normalizeCode(item);
+        else if (key === 'audience') {
+            if (!['all', 'selected'].includes(item)) fail(400, 'Invalid voucher audience');
+            result[key] = item;
+        } else if (key === 'user_ids') result[key] = access.normalizeUserIds(item, { allowEmpty: true });
         else if (['discount_type', 'status'].includes(key)) {
             if (!(key === 'status' ? statuses : ['fixed', 'percent']).includes(item)) fail(400, `Invalid ${key}`);
             result[key] = item;
@@ -59,9 +65,17 @@ function validate(value, partial = false) {
         if (result.discount_type === 'percent' && math.cents(result.discount_value) > 10000n) fail(400, 'Percentage discount cannot exceed 100');
         if (Date.parse(result.ends_at_utc) <= Date.parse(result.starts_at_utc)) fail(400, 'Voucher end must be after its start');
     }
+    if (newVoucher) {
+        if (result.total_limit === null) fail(400, 'New vouchers require a positive total quantity');
+        if (Object.hasOwn(value, 'per_user_limit') && result.per_user_limit !== 1) fail(400, 'New vouchers permit one use per customer');
+        result.per_user_limit = 1;
+        result.audience ||= 'all';
+        result.user_ids ||= [];
+        if (result.audience === 'selected' && !result.user_ids.length) fail(400, 'Select at least one customer for a restricted voucher');
+    }
     return result;
 }
-const validateCreate = value => validate(value);
+const validateCreate = value => validate(value, false, true);
 const validateUpdate = value => validate(value, true);
 async function assertReady(db = database()) {
     try { await require('../migrations/008-voucher-foundation').verify(db); }
@@ -99,7 +113,7 @@ async function requireAdmin(db, adminId) {
 async function read(db, voucherId, lock = false) {
     const [[voucher]] = await db.execute(`SELECT ${selectVoucher} FROM vouchers v WHERE v.voucher_id=?${lock ? ' FOR UPDATE' : ''}`, [identity(voucherId)]);
     if (!voucher) fail(404, 'Voucher not found', 'VOUCHER_NOT_FOUND');
-    return voucher;
+    return { ...voucher, ...await access.policy(db, voucher.voucher_id, { lock }) };
 }
 async function activeRedemptions(db, voucherId) {
     // A consistent SELECT/SUM under REPEATABLE READ may be older than the row
@@ -135,6 +149,7 @@ async function quoteLocked(db, { code, userId, subtotal, voucher, paymentMethod 
     voucher ||= await lockByCode(db, code);
     if (code !== undefined && normalizeCode(code) !== voucher.code) fail(409, 'Voucher lock does not match request', 'VOUCHER_CONFLICT');
     await window(db, voucher);
+    await access.enforceLocked(db, voucher.voucher_id, userId);
     if (math.cents(subtotal) < math.cents(voucher.minimum_order_amount)) fail(409, 'Order does not meet voucher minimum amount', 'VOUCHER_MINIMUM_NOT_MET');
     const quote = math.calculateDiscount(subtotal, voucher);
     const remaining = quota(voucher, await activeRedemptions(db, voucher.voucher_id), userId);
@@ -150,6 +165,7 @@ async function reserveLocked(db, { voucher, orderId, userId, discountAmount }) {
         return { ...existing, replayed: true };
     }
     await window(db, voucher);
+    await access.enforceLocked(db, voucher.voucher_id, userId);
     quota(voucher, await activeRedemptions(db, voucher.voucher_id), userId);
     const [[order]] = await db.execute('SELECT user_id,subtotal_amount,discount_amount,total_amount,voucher_code_snapshot FROM orders WHERE order_id=? FOR UPDATE', [orderId]);
     if (!order || String(order.user_id) !== String(userId) || order.voucher_code_snapshot !== voucher.code || order.discount_amount !== discountAmount) fail(409, 'Voucher order snapshot needs review', 'VOUCHER_CONFLICT');
@@ -197,11 +213,15 @@ async function create(adminId, input) {
     const data = validateCreate(input);
     return transaction(async db => {
         await requireAdmin(db, adminId);
+        await access.assertDistributionReady(db);
         const [created] = await db.execute(`INSERT INTO vouchers (${fields.join(',')},created_at_utc,updated_at_utc)
             VALUES (${fields.map(() => '?').join(',')},UTC_TIMESTAMP(3),UTC_TIMESTAMP(3))`,
         fields.map(field => field.endsWith('_utc') ? sqlUtc(data[field]) : data[field]));
         const [[{ id }]] = await db.query('SELECT CAST(LAST_INSERT_ID() AS CHAR) AS id');
-        return read(db, id || created.insertId);
+        const voucherId = id || created.insertId;
+        await access.savePolicyLocked(db, voucherId, data.audience);
+        if (data.user_ids.length) await access.grantLocked(db, adminId, voucherId, data.user_ids);
+        return read(db, voucherId);
     });
 }
 async function list({ page = 1, limit = 20, q, status } = {}) {
@@ -209,34 +229,49 @@ async function list({ page = 1, limit = 20, q, status } = {}) {
     if (q !== undefined && (typeof q !== 'string' || q.trim().length > 64 || /[^\x20-\x7e]/.test(q))) fail(400, 'Invalid voucher search');
     if (status !== undefined && !statuses.includes(status)) fail(400, 'Invalid voucher status filter');
     return transaction(async db => {
+        const distribution = await access.distributionReady(db);
+        const audienceJoin = distribution ? ' LEFT JOIN voucher_audiences a ON a.voucher_id=v.voucher_id' : '';
+        const audienceSelect = distribution ? "COALESCE(a.audience,'all') AS audience,(a.voucher_id IS NOT NULL) AS distribution_managed" : "'all' AS audience,0 AS distribution_managed";
         const conditions = [], values = [];
         if (q?.trim()) { conditions.push("v.code LIKE ? ESCAPE '='"); values.push('%' + q.trim().toUpperCase().replace(/[=%_]/g, value => '=' + value) + '%'); }
         if (status !== undefined) { conditions.push('v.status=?'); values.push(status); }
         const where = conditions.length ? ' WHERE ' + conditions.join(' AND ') : '';
         const [[{ total }]] = await db.execute(`SELECT COUNT(*) AS total FROM vouchers v${where}`, values);
-        const [vouchers] = await db.query(`SELECT ${selectVoucher} FROM vouchers v${where} ORDER BY v.voucher_id DESC LIMIT ? OFFSET ?`, [...values, limit, (page - 1) * limit]);
-        return { total, vouchers };
+        const [vouchers] = await db.query(`SELECT ${selectVoucher},${audienceSelect} FROM vouchers v${audienceJoin}${where} ORDER BY v.voucher_id DESC LIMIT ? OFFSET ?`, [...values, limit, (page - 1) * limit]);
+        return { total, vouchers: vouchers.map(voucher => ({ ...voucher, distribution_managed: Boolean(voucher.distribution_managed) })) };
     });
 }
 const get = voucherId => transaction(db => read(db, voucherId));
-async function listForCustomer(userId, { page = 1, limit = 20 } = {}) {
+async function listForCustomer(userId, { page = 1, limit = 20, assignedOnly = false } = {}) {
     if (!Number.isSafeInteger(page) || page < 1 || page > 2147483647 ||
-        !Number.isSafeInteger(limit) || limit < 1 || limit > 50 || !Number.isSafeInteger((page - 1) * limit)) fail(400, 'Invalid voucher pagination');
+        !Number.isSafeInteger(limit) || limit < 1 || limit > 50 || !Number.isSafeInteger((page - 1) * limit) || typeof assignedOnly !== 'boolean') fail(400, 'Invalid voucher pagination');
     return transaction(async db => {
         const [[user]] = await db.execute('SELECT role,status FROM `user` WHERE user_id=?', [userId]);
         if (!user || user.role !== 'user' || user.status !== 'active') fail(403, 'Active customer account required', 'VOUCHER_FORBIDDEN');
+        const distribution = await access.distributionReady(db);
+        if (assignedOnly && !distribution) return { total: 0, vouchers: [] };
         const [[clock]] = await db.query("SELECT DATE_FORMAT(UTC_TIMESTAMP(3),'%Y-%m-%d %H:%i:%s.%f') AS now_sql");
         // Discovery is a read-only snapshot, not an admission/reservation. The
         // existing quote and checkout lock/recheck current conditions as before.
-        const where = `WHERE v.status='active' AND v.starts_at_utc<=? AND v.ends_at_utc>?
+        const audienceJoin = distribution ? ' LEFT JOIN voucher_audiences a ON a.voucher_id=v.voucher_id' : '';
+        let where = `WHERE v.status='active' AND v.starts_at_utc<=? AND v.ends_at_utc>?
             AND (v.total_limit IS NULL OR v.total_limit > (SELECT COUNT(*) FROM voucher_redemptions r
                 WHERE r.voucher_id=v.voucher_id AND r.status IN ('reserved','consumed')))
             AND (v.per_user_limit IS NULL OR v.per_user_limit > (SELECT COUNT(*) FROM voucher_redemptions r
                 WHERE r.voucher_id=v.voucher_id AND r.user_id=? AND r.status IN ('reserved','consumed')))`;
         const values = [clock.now_sql, clock.now_sql, userId];
-        const [[{ total }]] = await db.execute(`SELECT COUNT(*) AS total FROM vouchers v ${where}`, values);
+        if (distribution) {
+            where += ` AND (a.voucher_id IS NULL OR a.audience='all' OR EXISTS
+                (SELECT 1 FROM voucher_assignments assigned WHERE assigned.voucher_id=v.voucher_id AND assigned.user_id=?))`;
+            values.push(userId);
+        }
+        if (assignedOnly) {
+            where += ' AND EXISTS (SELECT 1 FROM voucher_assignments mine WHERE mine.voucher_id=v.voucher_id AND mine.user_id=?)';
+            values.push(userId);
+        }
+        const [[{ total }]] = await db.execute(`SELECT COUNT(*) AS total FROM vouchers v${audienceJoin} ${where}`, values);
         const [vouchers] = await db.query(`SELECT v.code,v.discount_type,v.discount_value,v.max_discount_amount,
-            v.minimum_order_amount,v.starts_at_utc,v.ends_at_utc FROM vouchers v ${where}
+            v.minimum_order_amount,v.starts_at_utc,v.ends_at_utc FROM vouchers v${audienceJoin} ${where}
             ORDER BY v.ends_at_utc ASC,v.voucher_id ASC LIMIT ? OFFSET ?`, [...values, limit, (page - 1) * limit]);
         return { total, vouchers };
     }, { readOnlySnapshot: true });
@@ -246,7 +281,20 @@ async function update(adminId, voucherId, input) {
     return transaction(async db => {
         await requireAdmin(db, adminId);
         const current = await read(db, voucherId, true);
-        const data = validateCreate(Object.fromEntries(fields.map(field => [field, Object.hasOwn(changes, field) ? changes[field] : current[field]])));
+        const distributionChanges = distributionFields.some(field => Object.hasOwn(changes, field));
+        if (distributionChanges) {
+            await access.assertDistributionReady(db);
+            if (!current.distribution_managed) fail(409, 'Legacy voucher audience and limits must remain unchanged; use customer grants instead', 'VOUCHER_AUDIENCE_IMMUTABLE');
+        }
+        // Legacy vouchers retain their historical nullable/per-customer limits.
+        const data = validate(Object.fromEntries(fields.map(field => [field, Object.hasOwn(changes, field) ? changes[field] : current[field]])));
+        if (current.distribution_managed && (data.total_limit === null || data.per_user_limit !== 1)) {
+            fail(400, 'Managed vouchers require a positive total quantity and one use per customer');
+        }
+        if (Object.hasOwn(changes, 'audience') && changes.audience !== current.audience) {
+            const [used] = await db.execute('SELECT redemption_id FROM voucher_redemptions WHERE voucher_id=? ORDER BY redemption_id LIMIT 1 FOR UPDATE', [current.voucher_id]);
+            if (used.length) fail(409, 'Voucher audience cannot change after a redemption exists', 'VOUCHER_AUDIENCE_IMMUTABLE');
+        }
         if (data.code !== current.code) {
             const [used] = await db.execute('SELECT redemption_id FROM voucher_redemptions WHERE voucher_id=? ORDER BY redemption_id LIMIT 1 FOR UPDATE', [current.voucher_id]);
             if (used.length) fail(409, 'Voucher code cannot change after a redemption exists', 'VOUCHER_CODE_IMMUTABLE');
@@ -258,13 +306,48 @@ async function update(adminId, voucherId, input) {
             for (const row of active) users.set(row.user_id, (users.get(row.user_id) || 0) + 1);
             if ([...users.values()].some(count => count > data.per_user_limit)) fail(409, 'Per-user limit cannot be below current usage', 'VOUCHER_LIMIT_BELOW_USAGE');
         }
-        const changed = Object.keys(changes);
-        await db.execute(`UPDATE vouchers SET ${changed.map(field => `${field}=?`).join(',')},updated_at_utc=UTC_TIMESTAMP(3) WHERE voucher_id=?`,
-        [...changed.map(field => field.endsWith('_utc') ? sqlUtc(data[field]) : data[field]), current.voucher_id]);
+        const changed = Object.keys(changes).filter(field => fields.includes(field));
+        if (changed.length) {
+            await db.execute(`UPDATE vouchers SET ${changed.map(field => `${field}=?`).join(',')},updated_at_utc=UTC_TIMESTAMP(3) WHERE voucher_id=?`,
+            [...changed.map(field => field.endsWith('_utc') ? sqlUtc(data[field]) : data[field]), current.voucher_id]);
+        }
+        if (changes.user_ids?.length) await access.grantLocked(db, adminId, current.voucher_id, changes.user_ids);
+        if (Object.hasOwn(changes, 'audience')) {
+            if (changes.audience === 'selected') {
+                const [assigned] = await db.execute('SELECT user_id FROM voucher_assignments WHERE voucher_id=? ORDER BY user_id LIMIT 1 FOR SHARE', [current.voucher_id]);
+                if (!assigned.length) fail(400, 'Select at least one customer for a restricted voucher');
+            }
+            await access.savePolicyLocked(db, current.voucher_id, changes.audience);
+        }
         return read(db, current.voucher_id);
     });
 }
 const disable = (adminId, voucherId) => update(adminId, voucherId, { status: 'disabled' });
+async function grant(adminId, voucherId, userIds) {
+    const ids = access.normalizeUserIds(userIds);
+    return transaction(async db => {
+        await requireAdmin(db, adminId);
+        await access.assertDistributionReady(db);
+        const voucher = await read(db, voucherId, true);
+        // Grants never change a legacy/public audience or increase its quota.
+        const granted = await access.grantLocked(db, adminId, voucher.voucher_id, ids);
+        return { voucher, ...granted };
+    });
+}
+async function listAssignments(adminId, voucherId, { page = 1, limit = 20 } = {}) {
+    if (!Number.isSafeInteger(page) || page < 1 || !Number.isSafeInteger(limit) || limit < 1 || limit > 100 || !Number.isSafeInteger((page - 1) * limit)) fail(400, 'Invalid assignment pagination');
+    return transaction(async db => {
+        await requireAdmin(db, adminId);
+        await access.assertDistributionReady(db);
+        const voucher = await read(db, voucherId);
+        const [[{ total }]] = await db.execute('SELECT COUNT(*) AS total FROM voucher_assignments WHERE voucher_id=?', [voucher.voucher_id]);
+        const [users] = await db.query(`SELECT CAST(u.user_id AS CHAR) AS user_id,u.full_name,u.email,u.phone,u.status,
+            CAST(a.granted_by AS CHAR) AS granted_by,a.granted_at_utc FROM voucher_assignments a
+            JOIN \`user\` u ON u.user_id=a.user_id WHERE a.voucher_id=? ORDER BY a.granted_at_utc DESC,a.user_id ASC LIMIT ? OFFSET ?`,
+        [voucher.voucher_id, limit, (page - 1) * limit]);
+        return { total, users };
+    });
+}
 async function quoteForItems(userId, input) {
     if (!input || typeof input !== 'object' || Array.isArray(input) || Object.keys(input).some(key => !['code', 'items', 'payment_method'].includes(key)) ||
         !['COD', 'ONLINE'].includes(input.payment_method) || !Array.isArray(input.items) || !input.items.length || input.items.length > 100 ||
@@ -291,4 +374,6 @@ async function quoteForItems(userId, input) {
 
 module.exports = { normalizeCode, validateCreate, validateUpdate, calculateDiscount: math.calculateDiscount,
     assertEnabled: config.assertEnabled, assertReady, lockByCode, quoteLocked, reserveLocked, consumeLocked, releaseLocked,
-    create, list, get, update, disable, listForCustomer, quoteForItems, quote: quoteForItems };
+    assertDistributionReady: (db = database()) => access.assertDistributionReady(db),
+    distributionReady: (db = database()) => access.distributionReady(db),
+    create, list, get, update, disable, grant, listAssignments, listForCustomer, quoteForItems, quote: quoteForItems };

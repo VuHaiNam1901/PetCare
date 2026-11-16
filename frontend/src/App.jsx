@@ -10,6 +10,7 @@ import CartPage from './pages/CartPage.jsx';
 import AuthPage from './pages/AuthPage.jsx';
 import CheckoutPage from './pages/CheckoutPage.jsx';
 import MyOrdersPage from './pages/MyOrdersPage.jsx';
+import MyVouchersPage from './pages/MyVouchersPage.jsx';
 import OrderDetailPage from './pages/OrderDetailPage.jsx';
 import AdminOrdersPage from './pages/AdminOrdersPage.jsx';
 import AdminProductsPage from './pages/AdminProductsPage.jsx';
@@ -38,6 +39,7 @@ export default function App() {
   const pathname = window.location.pathname.replace(/\/+$/, '');
   const isProductsPage = pathname === '/products';
   const isWishlistPage = pathname === '/wishlist';
+  const isMyVouchersPage = pathname === '/my-vouchers';
   const detailMatch = pathname.match(/^\/products\/([^/]+)$/);
   const isProductDetailPage = Boolean(detailMatch);
   const productReviewsMatch = pathname.match(/^\/products\/([^/]+)\/reviews$/);
@@ -56,7 +58,7 @@ export default function App() {
   const productReviewMatch = pathname.match(/^\/my-orders\/([^/]+)\/review\/([^/]+)$/);
   const isProductReviewPage = Boolean(productReviewMatch);
   const authMode = pathname === '/login' ? 'login' : pathname === '/register' ? 'register' : '';
-  const isHomePage = !isProductsPage && !isWishlistPage && !isProductDetailPage && !isProductReviewsPage && !isCartPage && !isCheckoutPage && !isMyOrdersPage && !isAdminOrdersPage && !isAdminProductsPage && !isAdminCategoriesPage && !isAdminUsersPage && !isAdminVouchersPage && !isProfilePage && !isProductReviewPage && !authMode;
+  const isHomePage = !isProductsPage && !isWishlistPage && !isMyVouchersPage && !isProductDetailPage && !isProductReviewsPage && !isCartPage && !isCheckoutPage && !isMyOrdersPage && !isAdminOrdersPage && !isAdminProductsPage && !isAdminCategoriesPage && !isAdminUsersPage && !isAdminVouchersPage && !isProfilePage && !isProductReviewPage && !authMode;
   const products = useApiList('/api/products', 'products');
   const categories = useApiList('/api/categories', 'categories');
   const petTypes = useApiList('/api/pet-types', 'pet_types');
@@ -101,7 +103,7 @@ export default function App() {
       <a className="skip-link" href="#main-content">Đến nội dung chính</a>
       <Header query={query} onQueryChange={setQuery} categories={categories.data} onCategoryChange={setSelectedCategory} onUnavailable={showUnavailable} isProductsPage={isProductsPage} isProductDetailPage={isProductDetailPage} isProductReviewsPage={isProductReviewsPage} keepCartVisible={isHomePage || isProductsPage || isProductDetailPage || isProductReviewsPage || isWishlistPage} />
       <main id="main-content">
-        {isWishlistPage ? <WishlistPage onAction={onProductAction} cartBusy={commerce.busy || commerce.authLoading} /> : isProductReviewPage ? <ProductReviewPage orderId={productReviewMatch[1]} productId={productReviewMatch[2]} /> : isProfilePage ? <ProfilePage /> : isAdminVouchersPage ? <AdminVouchersPage /> : isAdminUsersPage ? <AdminUsersPage /> : isAdminCategoriesPage ? <AdminCategoriesPage /> : isAdminProductsPage ? <AdminProductsPage /> : isAdminOrdersPage ? <AdminOrdersPage orderId={adminDetailMatch?.[1]} /> : isCartPage ? <CartPage /> : isCheckoutPage ? <CheckoutPage /> : isMyOrdersPage ? (orderDetailMatch ? <OrderDetailPage orderId={orderDetailMatch[1]} /> : <MyOrdersPage />) : authMode ? <AuthPage mode={authMode} /> : isProductDetailPage ? (
+        {isMyVouchersPage ? <MyVouchersPage /> : isWishlistPage ? <WishlistPage onAction={onProductAction} cartBusy={commerce.busy || commerce.authLoading} /> : isProductReviewPage ? <ProductReviewPage orderId={productReviewMatch[1]} productId={productReviewMatch[2]} /> : isProfilePage ? <ProfilePage /> : isAdminVouchersPage ? <AdminVouchersPage /> : isAdminUsersPage ? <AdminUsersPage /> : isAdminCategoriesPage ? <AdminCategoriesPage /> : isAdminProductsPage ? <AdminProductsPage /> : isAdminOrdersPage ? <AdminOrdersPage orderId={adminDetailMatch?.[1]} /> : isCartPage ? <CartPage /> : isCheckoutPage ? <CheckoutPage /> : isMyOrdersPage ? (orderDetailMatch ? <OrderDetailPage orderId={orderDetailMatch[1]} /> : <MyOrdersPage />) : authMode ? <AuthPage mode={authMode} /> : isProductDetailPage ? (
           <ProductDetailPage productId={detailMatch[1]} products={products.data} categories={categories.data} loading={products.loading} error={products.error} retry={products.retry} onAction={onProductAction} cartBusy={commerce.busy || commerce.authLoading} />
         ) : isProductReviewsPage ? (
           <ProductReviewsPage productId={productReviewsMatch[1]} />

@@ -16,7 +16,8 @@ const handle = action => async (req, res, next) => {
 
 router.get('/pet-types', handle(async (req, res) => {
     if (Object.keys(req.query).length) bad('Unsupported filter');
-    res.json({ success: true, ...await petTypes.list() });
+    res.set('Cache-Control', 'no-store');
+    res.json({ success: true, ...await petTypes.list({ availableOnly: false }) });
 }));
 
 router.get('/products', handle(async (req, res) => {

@@ -7,6 +7,15 @@ const router = express.Router();
 router.use(authenticate, authorize('admin'));
 router.use(featureGate(config.assertEnabled));
 
+router.get('/customers', handle(async (req, res) => {
+    if (Object.keys(req.query).some(key => !['page', 'limit', 'q'].includes(key))) bad('Unsupported voucher customer search parameters');
+    const filters = pagination(req.query);
+    if (filters.limit > 50) bad('Customer search limit must not exceed 50');
+    const q = req.query.q === undefined ? '' : req.query.q;
+    res.set('Cache-Control', 'no-store');
+    res.json({ success: true, ...filters, ...await require('../models/voucher-customer').search({ ...filters, q }) });
+}));
+
 router.get('/', handle(async (req, res) => {
     if (Object.keys(req.query).some(key => !['page', 'limit', 'q', 'status'].includes(key))) bad('Unsupported voucher filter');
     const filters = pagination(req.query);
@@ -33,6 +42,21 @@ router.post('/', handle(async (req, res) => {
 router.get('/:id', handle(async (req, res) => {
     noQuery(req);
     res.json({ success: true, voucher: await vouchers.get(voucherId(req.params.id)) });
+}));
+
+router.get('/:id/assignments', handle(async (req, res) => {
+    if (Object.keys(req.query).some(key => !['page', 'limit'].includes(key))) bad('Unsupported voucher assignment filter');
+    const filters = pagination(req.query);
+    if (filters.limit > 50) bad('Assignment list limit must not exceed 50');
+    res.set('Cache-Control', 'no-store');
+    res.json({ success: true, ...filters, ...await vouchers.listAssignments(req.user.user_id, voucherId(req.params.id), filters) });
+}));
+
+router.post('/:id/assignments', handle(async (req, res) => {
+    noQuery(req);
+    const input = body(req);
+    if (Object.keys(input).length !== 1 || !Object.hasOwn(input, 'user_ids')) bad('Only user_ids may be supplied when granting a voucher');
+    res.json({ success: true, ...await vouchers.grant(req.user.user_id, voucherId(req.params.id), input.user_ids) });
 }));
 
 router.patch('/:id', handle(async (req, res) => {

@@ -126,7 +126,7 @@ export function CommerceProvider({ children }) {
     if (mergeRef.current.pending) throw new Error('Giỏ khách chưa đồng bộ xong. Vui lòng mở Giỏ hàng và thử đồng bộ lại trước khi tiếp tục.');
   }
   async function expireSession(error) {
-    if (!tokenRef.current || ![401, 403].includes(error.status)) return;
+    if (!tokenRef.current || ![401, 403].includes(error.status) || error.code === 'VOUCHER_NOT_ASSIGNED') return;
     clearChatOnLogout();
     epoch.current++; tokenRef.current = null; userRef.current = null;
     sessionStorage.removeItem(TOKEN_KEY); setUser(null); displayCart(emptyCart());
@@ -281,7 +281,7 @@ export function CommerceProvider({ children }) {
           activateChatIdentity(chatIdentity(result.user));
           userRef.current = result.user; setUser(result.user);
           const path = window.location.pathname.replace(/\/+$/, '');
-          if (path === '/wishlist' || path === '/my-orders' || path.startsWith('/my-orders/') || path === '/admin/orders' || path.startsWith('/admin/orders/') || path === '/admin/products' || path === '/admin/categories' || path === '/admin/users' || path === '/admin/vouchers' || path === '/profile') {
+          if (path === '/wishlist' || path === '/my-vouchers' || path === '/my-orders' || path.startsWith('/my-orders/') || path === '/admin/orders' || path.startsWith('/admin/orders/') || path === '/admin/products' || path === '/admin/categories' || path === '/admin/users' || path === '/admin/vouchers' || path === '/profile') {
             await synchronize(result.user, generation, { readOnly: true });
           } else {
             await withGuestLock(async () => {
@@ -603,11 +603,15 @@ export function CommerceProvider({ children }) {
   }
   const quoteCheckoutVoucher = (input, options = {}) => voucherRequest('user', token => vouchersApi.quoteVoucher(token, input, options), options);
   const getCheckoutVouchers = (options = {}) => voucherRequest('user', token => vouchersApi.listCustomerVouchers(token, options), options);
+  const getCustomerVouchers = (options = {}) => voucherRequest('user', token => vouchersApi.listCustomerVouchers(token, options), options);
   const getAdminVouchers = (options = {}) => voucherRequest('admin', token => vouchersApi.listVouchers(token, options), options);
   const getAdminVoucher = (id, options = {}) => voucherRequest('admin', token => vouchersApi.getVoucher(token, id, options), options);
   const createAdminVoucher = body => voucherRequest('admin', token => vouchersApi.createVoucher(token, body));
   const updateAdminVoucher = (id, body) => voucherRequest('admin', token => vouchersApi.updateVoucher(token, id, body));
   const disableAdminVoucher = id => voucherRequest('admin', token => vouchersApi.disableVoucher(token, id));
+  const searchVoucherCustomers = (options = {}) => voucherRequest('admin', token => vouchersApi.searchVoucherCustomers(token, options), options);
+  const getAdminVoucherAssignments = (id, options = {}) => voucherRequest('admin', token => vouchersApi.getVoucherAssignments(token, id, options), options);
+  const grantAdminVoucher = (id, userIds) => voucherRequest('admin', token => vouchersApi.grantVoucher(token, id, userIds));
   async function accountProfileRequest(action, { signal, revision } = {}) {
     if (!userRef.current || !tokenRef.current) throw Object.assign(new Error('Vui lòng đăng nhập để xem thông tin cá nhân.'), { status: 401 });
     const generation = epoch.current;
@@ -734,7 +738,7 @@ export function CommerceProvider({ children }) {
     return false;
   }
 
-  return <Context.Provider value={{ user, authLoading, cart, cartLoading, cartError, busy, cartSource, mergeError, mergeConflicts, mergeCanEdit, pendingIntent, beginLogin, login, register, logout, retryCart, retryMerge, addItem, updateItem, removeItem, selectItem, selectAll, checkout, buyNow, resumeCheckout, submitOrder, orderCommitted, getOrders, getOrder, getOrderPayment, cancelOrder, getWishlist, saveWishlistProduct, getAdminOrders, getAdminOrder, approveAdminOrder, rejectAdminOrder, updateAdminOrder, getAdminProducts, getAdminProductCategories, getAdminPetTypes, createAdminProduct, updateAdminProduct, stopAdminProduct, getAdminCategories, createAdminCategory, updateAdminCategory, deleteAdminCategory, getAdminUsers, updateAdminUserStatus, getAdminVouchers, getAdminVoucher, createAdminVoucher, updateAdminVoucher, disableAdminVoucher, quoteCheckoutVoucher, getCheckoutVouchers, getProfile, updateProfile, getMyReviews, createProductReview, notify, notice, noticeType, clearNotice: () => setNotice('') }}>{children}</Context.Provider>;
+  return <Context.Provider value={{ user, authLoading, cart, cartLoading, cartError, busy, cartSource, mergeError, mergeConflicts, mergeCanEdit, pendingIntent, beginLogin, login, register, logout, retryCart, retryMerge, addItem, updateItem, removeItem, selectItem, selectAll, checkout, buyNow, resumeCheckout, submitOrder, orderCommitted, getOrders, getOrder, getOrderPayment, cancelOrder, getWishlist, saveWishlistProduct, getAdminOrders, getAdminOrder, approveAdminOrder, rejectAdminOrder, updateAdminOrder, getAdminProducts, getAdminProductCategories, getAdminPetTypes, createAdminProduct, updateAdminProduct, stopAdminProduct, getAdminCategories, createAdminCategory, updateAdminCategory, deleteAdminCategory, getAdminUsers, updateAdminUserStatus, getAdminVouchers, getAdminVoucher, createAdminVoucher, updateAdminVoucher, disableAdminVoucher, quoteCheckoutVoucher, getCheckoutVouchers, getCustomerVouchers, searchVoucherCustomers, getAdminVoucherAssignments, grantAdminVoucher, getProfile, updateProfile, getMyReviews, createProductReview, notify, notice, noticeType, clearNotice: () => setNotice('') }}>{children}</Context.Provider>;
 }
 
 export function useCommerce() {

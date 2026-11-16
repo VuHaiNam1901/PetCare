@@ -2,7 +2,7 @@ import { createContext, createElement, useCallback, useContext, useEffect, useMe
 import { getVoucherReadiness } from '../services/vouchers.js';
 
 const Context = createContext(null);
-const pending = { ready: false, onlineReady: false, loading: true, error: '' };
+const pending = { ready: false, onlineReady: false, distributionReady: false, loading: true, error: '' };
 export function VoucherReadinessProvider({ children }) {
   const [revision, setRevision] = useState(0);
   const [state, setState] = useState(pending);
@@ -11,9 +11,9 @@ export function VoucherReadinessProvider({ children }) {
     const controller = new AbortController();
     let active = true;
     getVoucherReadiness({ signal: controller.signal }).then(result => {
-      if (active) setState({ ready: result.ready, onlineReady: result.online_ready, loading: false, error: '' });
+      if (active) setState({ ready: result.ready, onlineReady: result.online_ready, distributionReady: result.distribution_ready, loading: false, error: '' });
     }).catch(error => {
-      if (active && !controller.signal.aborted) setState({ ready: false, onlineReady: false, loading: false, error: error.message });
+      if (active && !controller.signal.aborted) setState({ ready: false, onlineReady: false, distributionReady: false, loading: false, error: error.message });
     });
     return () => { active = false; controller.abort(); };
   }, [revision]);

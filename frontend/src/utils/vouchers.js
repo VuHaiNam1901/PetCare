@@ -1,6 +1,10 @@
 export const voucherMessages = {
   VOUCHERS_DISABLED: 'Voucher hiện chưa được mở sử dụng. Bạn có thể tiếp tục đặt hàng không dùng mã.',
   VOUCHER_SCHEMA_NOT_READY: 'Voucher hiện chưa sẵn sàng. Vui lòng thử lại sau.',
+  VOUCHER_DISTRIBUTION_NOT_READY: 'Chức năng tạo và cấp Voucher mới chưa sẵn sàng. Voucher hiện có vẫn giữ nguyên điều kiện sử dụng.',
+  VOUCHER_NOT_ASSIGNED: 'Voucher này chỉ dành cho khách hàng được cấp mã. Tài khoản của bạn chưa được cấp Voucher này.',
+  VOUCHER_INVALID_RECIPIENT: 'Chỉ có thể cấp Voucher cho tài khoản khách hàng đang hoạt động. Vui lòng kiểm tra lại danh sách đã chọn.',
+  VOUCHER_AUDIENCE_IMMUTABLE: 'Không thể đổi đối tượng áp dụng của Voucher cũ hoặc Voucher đã phát sinh lượt sử dụng.',
   VOUCHER_NOT_FOUND: 'Không tìm thấy mã Voucher. Vui lòng kiểm tra lại mã.',
   VOUCHER_INACTIVE: 'Mã Voucher chưa được kích hoạt hoặc đã bị vô hiệu hóa.',
   VOUCHER_NOT_STARTED: 'Mã Voucher chưa đến thời gian sử dụng.',

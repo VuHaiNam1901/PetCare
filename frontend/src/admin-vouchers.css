@@ -17,6 +17,42 @@
 .admin-vouchers-dialog .admin-vouchers-details dt { margin-bottom: 7px; color: var(--color-muted); font-size: 11px; }
 .admin-vouchers-dialog .admin-vouchers-details dd { margin: 0; font-size: 13px; line-height: 1.7; font-weight: 600; overflow-wrap: anywhere; }
 .admin-vouchers-dialog .admin-vouchers-details + .admin-vouchers-timezone { margin-top: 18px; }
+.admin-vouchers-upgrade { margin-bottom: 20px; padding: 15px 17px; border: 1px solid #E9D5A6; border-radius: 6px; background: #FFF9EB; color: #79571F; font-size: 12px; line-height: 1.8; }
+.admin-vouchers-upgrade .button { margin-top: 10px; background: #fff; }
+.admin-vouchers-dialog .admin-vouchers-fixed-policy { margin: 0; min-height: 44px; padding: 10px 12px; border: 1px solid var(--color-border); border-radius: 5px; background: #F4F8FC; font-size: 13px; font-weight: 500; line-height: 1.7; }
+.admin-vouchers-dialog .admin-vouchers-grant-intro { margin: 0 0 18px; color: var(--color-muted); font-size: 12px; line-height: 1.9; }
+.admin-vouchers-dialog .admin-products-dialog-actions { flex-wrap: wrap; }
+.admin-vouchers-dialog .voucher-customers, .admin-vouchers-dialog .voucher-assignments { min-width: 0; padding: 16px; border: 1px solid var(--color-border); border-radius: 7px; background: #FAFCFF; }
+.admin-vouchers-dialog .voucher-assignments { margin-top: 18px; }
+.admin-vouchers-dialog .voucher-customers-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+.admin-vouchers-dialog .voucher-customers h3, .admin-vouchers-dialog .voucher-assignments h3 { font-size: 13px; font-weight: 600; }
+.admin-vouchers-dialog .voucher-customers-heading > span { color: var(--color-muted); font-size: 11px; white-space: nowrap; }
+.admin-vouchers-dialog .voucher-customers-search { display: flex; align-items: center; gap: 9px; min-width: 0; min-height: 44px; padding-inline: 11px; border: 1px solid #BAD5F3; border-radius: 5px; background: #fff; color: var(--color-muted); }
+.admin-vouchers-dialog .voucher-customers-search > svg { flex-shrink: 0; }
+.admin-vouchers-dialog .voucher-customers-search input { min-width: 0; width: 100%; min-height: 42px; padding: 9px 0; border: 0; background: transparent; color: var(--color-text); font-size: 12px; }
+.admin-vouchers-dialog .voucher-customers-hint { margin: 8px 0 0; color: var(--color-muted); font-size: 11px; line-height: 1.8; }
+.admin-vouchers-dialog .voucher-customers-state { padding: 17px 0; font-size: 12px; color: var(--color-muted); line-height: 1.8; }
+.admin-vouchers-dialog .voucher-customers-state .button { margin-top: 9px; }
+.admin-vouchers-dialog .voucher-customer-chips { display: flex; flex-wrap: wrap; gap: 7px; max-height: 145px; padding: 0; margin: 13px 0 0; list-style: none; overflow-y: auto; }
+.admin-vouchers-dialog .voucher-customer-chips li { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; padding: 5px 7px 5px 10px; border: 1px solid #BAD5F3; border-radius: 5px; background: #EAF6FF; color: #12659D; font-size: 11px; }
+.admin-vouchers-dialog .voucher-customer-chips li > span { min-width: 0; overflow-wrap: anywhere; }
+.admin-vouchers-dialog .voucher-customer-chips small { color: #587494; font-size: 10px; }
+.admin-vouchers-dialog .voucher-customer-chips button { display: grid; flex-shrink: 0; place-items: center; width: 28px; height: 28px; padding: 0; border: 0; border-radius: 4px; background: transparent; color: inherit; }
+.admin-vouchers-dialog .voucher-customer-chips button:hover:not(:disabled) { background: #D4EAFB; }
+.admin-vouchers-dialog .voucher-customer-results, .admin-vouchers-dialog .voucher-assignment-list { max-height: 285px; padding: 0; margin: 12px 0 0; list-style: none; overflow-y: auto; }
+.admin-vouchers-dialog .voucher-customer-results li + li, .admin-vouchers-dialog .voucher-assignment-list li + li { border-top: 1px solid var(--color-border); }
+.admin-vouchers-dialog .voucher-customer-results label { display: flex; align-items: flex-start; gap: 11px; padding: 11px 7px; cursor: pointer; }
+.admin-vouchers-dialog .voucher-customer-results label:has(input:checked) { background: #EAF6FF; }
+.admin-vouchers-dialog .voucher-customer-results input { flex: 0 0 17px; width: 17px; height: 17px; margin: 3px 0 0; accent-color: #1677B8; }
+.admin-vouchers-dialog .voucher-customer-results label > span, .admin-vouchers-dialog .voucher-assignment-list li { display: flex; min-width: 0; flex-direction: column; gap: 4px; overflow-wrap: anywhere; }
+.admin-vouchers-dialog .voucher-customer-results strong, .admin-vouchers-dialog .voucher-assignment-list strong { font-size: 12px; font-weight: 600; }
+.admin-vouchers-dialog .voucher-customer-results strong small, .admin-vouchers-dialog .voucher-assignment-list strong small { color: var(--color-muted); font-size: 10px; font-weight: 400; }
+.admin-vouchers-dialog .voucher-customer-results label > span > span, .admin-vouchers-dialog .voucher-assignment-list li > span { color: var(--color-muted); font-size: 11px; line-height: 1.7; }
+.admin-vouchers-dialog .voucher-assignment-list li { padding: 10px 2px; }
+.admin-vouchers-dialog .voucher-customers-pagination { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 11px; padding-top: 10px; border-top: 1px solid var(--color-border); color: var(--color-muted); font-size: 10px; }
+.admin-vouchers-dialog .voucher-customers-pagination > div { display: flex; gap: 5px; }
+.admin-vouchers-dialog .voucher-customers-pagination .icon-button { min-width: 34px; min-height: 34px; border: 1px solid var(--color-border); border-radius: 4px; background: #fff; }
+.admin-vouchers-dialog .voucher-customers-pagination button:disabled { opacity: .4; }
 @media (max-width: 1180px) {
   .admin-vouchers-page .admin-vouchers-filters { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .admin-vouchers-page .admin-products-filter-actions { grid-column: 1 / -1; }
@@ -30,4 +66,7 @@
   .admin-vouchers-page .admin-orders-sidebar nav a { flex: 1 1 44%; justify-content: flex-start; }
   .admin-vouchers-dialog { width: calc(100% - 24px); }
   .admin-vouchers-dialog .admin-vouchers-details { grid-template-columns: minmax(0, 1fr); }
+  .admin-vouchers-dialog .voucher-customers, .admin-vouchers-dialog .voucher-assignments { padding: 12px; }
+  .admin-vouchers-dialog .voucher-customers-heading { flex-wrap: wrap; gap: 6px; }
+  .admin-vouchers-dialog .voucher-customers-search input { font-size: 11px; }
 }
