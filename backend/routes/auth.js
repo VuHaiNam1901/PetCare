@@ -4,7 +4,10 @@ const jwt = require('jsonwebtoken');
 const config = require('../config/auth');
 const users = require('../models/user');
 const { authenticate } = require('../middleware/auth');
+const { createAuthLoginLimiter, createAuthRegisterLimiter } = require('../middleware/rate-limit');
 const router = express.Router();
+const loginRateLimit = createAuthLoginLimiter();
+const registerRateLimit = createAuthRegisterLimiter();
 
 function validate(body, mode) {
     if (!body || typeof body !== 'object' || Array.isArray(body)) throw new Error('JSON object required');
@@ -37,14 +40,14 @@ const input = mode => (req, res, next) => {
     catch (error) { res.status(400).json({ success: false, message: error.message }); }
 };
 
-router.post('/auth/register', input('register'), async (req, res) => {
+router.post('/auth/register', registerRateLimit, input('register'), async (req, res) => {
     if (await users.byEmail(req.input.email)) return res.status(409).json({ success: false, message: 'Email already registered' });
     const hash = await bcrypt.hash(req.input.password, 12);
     const user = await users.create(req.input, hash);
     res.status(201).json({ success: true, user });
 });
 
-router.post('/auth/login', input('login'), async (req, res) => {
+router.post('/auth/login', loginRateLimit, input('login'), async (req, res) => {
     const user = await users.byEmail(req.input.email);
     if (!user || !await bcrypt.compare(req.input.password, user.password)) return res.status(401).json({ success: false, message: 'Invalid email or password' });
     if (user.status !== 'active') return res.status(403).json({ success: false, message: 'Account is inactive' });

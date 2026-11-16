@@ -1,8 +1,10 @@
 const express = require('express');
 const { authenticate, authorize } = require('../middleware/auth');
+const { createOrderCreateLimiter } = require('../middleware/rate-limit');
 const orders = require('../models/order');
 const orderStatuses = require('../models/admin-order').states;
 const router = express.Router();
+const orderCreateRateLimit = createOrderCreateLimiter();
 router.get('/payment-options', async (req, res, next) => {
     try {
         res.set('Cache-Control', 'no-store');
@@ -31,7 +33,7 @@ const handle = action => async (req, res, next) => {
     }
 };
 
-router.post('/', handle(async (req, res) => {
+router.post('/', orderCreateRateLimit, handle(async (req, res) => {
     if (Object.keys(req.query).length) bad('Query parameters are not supported');
     const key = req.get('Idempotency-Key');
     if (!key || !/^[A-Za-z0-9_-]{16,128}$/.test(key)) bad('Idempotency-Key must contain 16-128 letters, digits, underscores or hyphens');

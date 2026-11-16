@@ -14,12 +14,17 @@ const reviewRoutes = require('./routes/reviews');
 const catalogRoutes = require('./routes/catalog');
 const { createChatRouter } = require('./routes/chat');
 
+const { createCorsOptions } = require('./config/cors');
+const { securityHeaders } = require('./middleware/security-headers');
+
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+app.disable('x-powered-by');
+app.use(securityHeaders());
 app.use(require('./routes/sepay').createSePayWebhookRouter({ pool }));
-app.use(cors());
-app.use(express.json());
+app.use(cors(createCorsOptions()));
+app.use(express.json({ limit: '64kb' }));
 app.use('/api', authRoutes);
 app.use('/api', reviewRoutes);
 app.use('/api', catalogRoutes);
@@ -40,17 +45,16 @@ app.get('/', (req, res) => {
     });
 });
 
-// API kiểm tra kết nối MySQL
+// API kiểm tra kết nối MySQL (không công khai tên database hay danh sách bảng)
 app.get('/api/health/db', async (req, res) => {
     try {
-        const [rows] = await pool.query(
-            'SELECT DATABASE() AS databaseName'
-        );
+        await pool.query('SELECT 1');
 
+        res.set('Cache-Control', 'no-store');
         res.json({
             success: true,
-            message: 'Connected to MySQL successfully',
-            database: rows[0].databaseName
+            status: 'ok',
+            message: 'Connected to MySQL successfully'
         });
     } catch (error) {
         console.error('MySQL connection error:', error.message);
@@ -65,18 +69,16 @@ app.get('/api/health/db', async (req, res) => {
 
 app.get('/api/health/tables', async (req, res) => {
     try {
-        const [rows] = await pool.query(
-            'SHOW TABLES'
-        );
+        await pool.query('SELECT 1');
 
+        res.set('Cache-Control', 'no-store');
         res.json({
             success: true,
-            database: process.env.DB_NAME,
-            totalTables: rows.length,
-            tables: rows.map(row => Object.values(row)[0])
+            status: 'ok',
+            message: 'Database health check passed'
         });
     } catch (error) {
-        console.error('Error listing tables:', error.message);
+        console.error('Error checking database health:', error.message);
 
         res.status(500).json({
             success: false,

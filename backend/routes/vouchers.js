@@ -3,7 +3,9 @@ const { authenticate, authorize } = require('../middleware/auth');
 const vouchers = require('../models/voucher');
 const config = require('../config/vouchers');
 const { bad, pagination, quoteInput, handle, featureGate } = require('./voucher-validation');
+const { createVoucherQuoteLimiter } = require('../middleware/rate-limit');
 const router = express.Router();
+const quoteRateLimit = createVoucherQuoteLimiter();
 const readiness = require('../services/voucher-readiness').createVoucherReadiness();
 router.get('/readiness', handle(async (req, res) => {
     res.set('Cache-Control', 'no-store');
@@ -27,7 +29,7 @@ router.get('/', handle(async (req, res) => {
     res.json({ success: true, ...filters, ...await vouchers.listForCustomer(req.user.user_id, { ...filters, assignedOnly: req.query.assigned === '1' }) });
 }));
 
-router.post('/quote', handle(async (req, res) => {
+router.post('/quote', quoteRateLimit, handle(async (req, res) => {
     // Only product IDs and quantities are accepted. The model resolves catalog
     // prices and checks quota without reserving stock or a voucher redemption.
     const input = quoteInput(req, vouchers.normalizeCode);
