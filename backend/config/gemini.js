@@ -9,8 +9,8 @@ const HTTP_OPTIONS = Object.freeze({ timeout: TIMEOUT_MS, retryOptions: Object.f
 
 function createGeminiClient() {
     const environment = dotenv.config({ path: path.join(__dirname, '..', '.env'), quiet: true });
-    const apiKey = environment.parsed?.GEMINI_API_KEY?.trim();
-    if (environment.error || !apiKey) throw Object.assign(new Error('Gemini configuration is unavailable'), { code: 'GEMINI_CONFIG' });
+    const apiKey = process.env.GEMINI_API_KEY?.trim() || environment.parsed?.GEMINI_API_KEY?.trim();
+    if (!apiKey) throw Object.assign(new Error('Gemini configuration is unavailable'), { code: 'GEMINI_CONFIG' });
     const { GoogleGenAI } = require('@google/genai');
     return new GoogleGenAI({ apiKey, vertexai: false, httpOptions: { ...HTTP_OPTIONS, retryOptions: { ...HTTP_OPTIONS.retryOptions } } });
 }
