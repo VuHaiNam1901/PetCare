@@ -32,7 +32,8 @@ function extractEvent(payload) {
         transactionId: String(payload.id), transferAmount: payload.transferAmount,
         transferType: payload.transferType, referenceCode: payload.referenceCode,
         ...recognizePaymentCode(payload.code, payload.content),
-        hasSevqrPrefix: /^SEVQR(?:\s|$)/i.test(payload.content),
+        // Allow only VietinBank's structured credit prefix before SEVQR.
+        hasSevqrPrefix: /^(?:CT DEN:[A-Z0-9]+[ \t]+)?SEVQR(?:\s|$)/i.test(payload.content),
     };
     event.outcome = payload.gateway.toLowerCase() !== 'vietinbank' ? 'ignored_gateway'
         : event.transferType !== 'in' ? 'ignored_outgoing'
