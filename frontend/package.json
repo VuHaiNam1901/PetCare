@@ -16,13 +16,14 @@
     "test:admin-orders": "playwright test --config playwright.admin-orders.config.js"
   },
   "dependencies": {
+    "lucide-react": "^1.58.0",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
-    "lucide-react": "^1.58.0"
+    "serve": "14.2.8"
   },
   "devDependencies": {
+    "@playwright/test": "^1.64.1",
     "@vitejs/plugin-react": "^6.1.2",
-    "vite": "^8.3.4",
-    "@playwright/test": "^1.64.1"
+    "vite": "^8.3.4"
   }
 }
