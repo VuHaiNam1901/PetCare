@@ -1,8 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { ChevronDown, ClipboardList, Compass, ContactRound, FolderTree, Heart, LogOut, Mail, Menu, Package, Phone, Search, ShoppingCart, TicketPercent, Truck, UserRound, Users, X } from 'lucide-react';
-import logoIcon from '../assets/logoshop.png';
-import logoWordmark from '../assets/chulogo.png';
-import { BRAND_NAME } from '../config/branding.js';
+import Logo from './Logo.jsx';
 import { useCommerce } from '../context/CommerceContext.jsx';
 import { useWishlist } from '../context/WishlistContext.jsx';
 import { useVoucherReadiness } from '../hooks/useVoucherReadiness.js';
@@ -61,10 +59,7 @@ export default function Header({ query, onQueryChange, categories, onCategoryCha
         <div className="contact-strip-links"><a href="#ve-petcare">Về PetCareShop</a><a href="#lien-he">Liên hệ</a></div>
       </div></div>
       <div className="container header-inner">
-        <a className="logo header-logo" href="/#trang-chu" aria-label={`${BRAND_NAME} — Trang chủ`}>
-          <img className="header-logo-icon" src={logoIcon} alt="" width={1024} height={765} />
-          <img className="header-logo-wordmark" src={logoWordmark} alt={BRAND_NAME} width={1024} height={318} />
-        </a>
+        <Logo />
         <form className="header-search" role="search" onSubmit={event => { event.preventDefault(); showProducts(); }}>
           <input type="search" aria-label="Tìm kiếm sản phẩm" placeholder="Tìm kiếm sản phẩm cho thú cưng..." value={query} onChange={event => onQueryChange(event.target.value)} />
           {query && <button className="clear-search" type="button" aria-label="Xóa tìm kiếm" onClick={() => onQueryChange('')}><X size={16} /></button>}
