@@ -11,7 +11,12 @@ const REJECTION_CODES = Object.freeze([
 ]);
 const rejectionCodes = new Set(REJECTION_CODES);
 const rejectionCode = error => rejectionCodes.has(error?.message) ? error.message : 'Invalid model response';
-const reject = message => { throw new Error(message); };
+const reject = (message, meta = {}) => {
+    const error = new Error(message);
+    if (meta.rule) error.rule = meta.rule;
+    if (meta.field) error.field = meta.field;
+    throw error;
+};
 const fold = value => String(value).normalize('NFD').replace(/\p{M}/gu, '').replace(/[đĐ]/g, 'd').toLowerCase();
 const escapeRegExp = value => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 const NUMBER = '\\d+(?:[.,]\\d+)*';
@@ -123,24 +128,61 @@ function replaceVerifiedCardFacts(text, selected) {
 // such as "Ban Nen" was previously rejected. Check naming contexts and only
 // suspicious proper-name shapes, after confirmed catalog names are replaced.
 const commonWords = new Set(('ban nen minh hay cho meo be thu cung lua chon cac nhung loai thuc an do choi bat nuoc sach giu ve sinh nha cua san pham duoi tren neu khi can khong chua co du thong tin du lieu de xac nhan khang dinh phu hop tuoi thang chu y cham soc dinh duong hanh vi tap luyen thuong ngay mot hai ba ben nay do la thi va voi dung su noi o ngon nhe tot them mot vai nguyen lieu huong dan bao bi nhan dang duoc khoang ngan sach trong xem nho lon theo doi chia nho bua tu tu tien nhu cau uu tien tim hieu cach doi don sau moi giup lam quen hoat dong deu dan luon tao an toan han che bao dam').split(' '));
-const genericAfterNaming = new Set(('cac nhung mot vai lua chon loai thuc an do choi bat nuoc sua cat vong day khay long chen cho meo be thu cung cach nhe theo dung san pham khau phan qua trinh nhan bao bi dung cu noi ngu cho o ve sinh cham soc tap luyen bac si thu y thuoc khan mem gel lich thoi phuong the that nao duoi tren').split(' '));
+const genericAfterNaming = new Set(('cac nhung mot vai lua chon loai thuc an do choi bat nuoc sua cat vong day khay long chen cho meo be thu cung cach nhe theo dung san pham khau phan qua trinh nhan bao bi dung cu noi ngu cho o ve sinh cham soc tap luyen bac si thu y thuoc khan mem gel lich thoi phuong the that nao duoi tren ghi tra luu doc tim hoi biet thay xem gui').split(' '));
 
 // Generic size/material terms are not brand names, including uppercase INOX.
 for (const word of ['size', 'inox']) { commonWords.add(word); genericAfterNaming.add(word); }
+
+const VI_CHAR_FOLD = Object.freeze({
+    a: 'aàáảãạăằắẳẵặâầấẩẫậ',
+    e: 'eèéẻẽẹêềếểễệ',
+    i: 'iìíỉĩị',
+    o: 'oòóỏõọôồốổỗộơờớởỡợ',
+    u: 'uùúủũụưừứửữự',
+    y: 'yỳýỷỹỵ',
+    d: 'dđ',
+});
+const BREED_STOP_WORDS = new Set([
+    'giong', 'cho', 'meo', 'chim', 'canh', 'hamster', 'chuot', 'tho',
+    'long', 'ngan', 'dai', 'trang', 'den', 'vang', 'xam', 'nhat', 'tay', 'tang', 'anh', 'my',
+]);
+
+function accentInsensitivePattern(phrase) {
+    const tokens = String(phrase ?? '').normalize('NFC').trim().split(/\s+/).filter(Boolean);
+    if (!tokens.length) return null;
+    return tokens.map(token => {
+        let out = '';
+        for (const ch of token) {
+            const base = ch.normalize('NFD').replace(/\p{M}/gu, '').replace(/[đĐ]/g, 'd').toLowerCase();
+            out += Object.hasOwn(VI_CHAR_FOLD, base) ? `[${VI_CHAR_FOLD[base]}]` : escapeRegExp(ch);
+        }
+        return out;
+    }).join('\\s+');
+}
 
 function maskObservedPetTerms(text, petProfiles = []) {
     const terms = [];
     for (const pet of petProfiles) {
         if (pet?.name) terms.push(String(pet.name).trim());
-        if (pet?.breed) terms.push(String(pet.breed).trim());
+        if (pet?.breed) {
+            const breed = String(pet.breed).trim();
+            terms.push(breed);
+            for (const word of breed.split(/\s+/)) {
+                const foldedWord = fold(word).replace(/[^a-z0-9]/g, '');
+                if (foldedWord.length >= 4 && !BREED_STOP_WORDS.has(foldedWord) && !commonWords.has(foldedWord)) {
+                    terms.push(word);
+                }
+            }
+        }
     }
     const unique = [...new Set(terms.filter(term => term.length >= 2))]
         .sort((a, b) => b.length - a.length);
     if (!unique.length) return text;
-    let masked = text;
+    let masked = text.normalize('NFC');
     for (const term of unique) {
-        const escaped = term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-        masked = masked.replace(new RegExp(`(?<![\\p{L}\\p{N}])${escaped}(?![\\p{L}\\p{N}])`, 'giu'), 'thú cưng');
+        const body = accentInsensitivePattern(term);
+        if (!body) continue;
+        masked = masked.replace(new RegExp(`(?<![\\p{L}\\p{N}])${body}(?![\\p{L}\\p{N}])`, 'giu'), 'thú cưng');
     }
     return masked;
 }
@@ -151,17 +193,17 @@ function assertNoInventedName(text, context) {
     for (const match of source.matchAll(/(?=(\b(?:san pham|nhan hieu|thuong hieu|brand|mua|chon|dung|de xuat|goi y|thuc an|pate|sua tam|cat ve sinh|minh co|shop co|cua hang co|co ban)\s+(?:moi\s+)?([a-z][a-z0-9_-]{2,})))/g)) {
         const offset = match.index + match[1].lastIndexOf(match[2]);
         const originalWord = petSafeText.slice(offset, offset + match[2].length);
-        if (!genericAfterNaming.has(match[2]) && !commonWords.has(match[2]) && !/[^\x00-\x7F]/.test(originalWord)) reject('Generated product name');
+        if (!genericAfterNaming.has(match[2]) && !commonWords.has(match[2]) && !/[^\x00-\x7F]/.test(originalWord)) reject('Generated product name', { rule: 'naming_pattern' });
     }
     const prose = petSafeText.replace(/PetCare(?:Shop)?/g, 'trợ lý');
     for (const match of prose.matchAll(/\b[A-Z][a-z]{2,}\s+[A-Z][A-Za-z0-9+_-]{2,}\b|\b[A-Z][a-z]+(?:[A-Z][a-z]*)+\b|\b[A-Z]{3,}[A-Z0-9+_-]*\b/g)) {
-        if (normalizeText(match[0]).split(' ').some(word => !commonWords.has(word))) reject('Unverified proper name in prose');
+        if (normalizeText(match[0]).split(' ').some(word => !commonWords.has(word))) reject('Unverified proper name in prose', { rule: 'proper_name' });
     }
     // Also cover lowercase names used as a sentence subject without "buy".
     const subject = /(?:^|[.!?]\s*)([\p{L}][\p{L}\d_-]{2,})(?:\s+([\p{L}][\p{L}\d_-]{2,}))?\s+(?:rat tot|chat luong cao|tot cho|giup dieu tri)\b/giu;
-    for (const match of fold(petSafeText).matchAll(subject)) if (!commonWords.has(match[1])) reject('Generated product name');
+    for (const match of fold(petSafeText).matchAll(subject)) if (!commonWords.has(match[1])) reject('Generated product name', { rule: 'sentence_subject' });
     for (const product of context.products || []) {
-        if (String(product.name).length >= 6 && namePattern(String(product.name)).test(text)) reject('Product name belongs in a card');
+        if (String(product.name).length >= 6 && namePattern(String(product.name)).test(text)) reject('Product name belongs in a card', { rule: 'catalog_name_in_prose' });
     }
 }
 
@@ -190,7 +232,7 @@ function assertNoConcreteMedication(text) {
     if (concreteDrugOrDose) reject('Diagnosis or medication instruction');
 }
 
-function validateProse(text, context) {
+function validateProse(text, context, fieldName = 'advice') {
     const folded = normalizeText(text);
     assertNoConcreteMedication(text);
     if (context.intent !== 'website_help') require('./page-context').validatePageProse(text, context.page_context);
@@ -199,57 +241,75 @@ function validateProse(text, context) {
         assertNoInventedName(prose, context);
         return;
     }
-    if (/[₫$€]/.test(text) || [...fold(text).matchAll(MONEY)].length || /\b(?:gia|ton kho|so luong|con lai)\b.{0,35}\d/.test(folded)) reject('Generated commercial facts');
+    if (/[₫$€]/.test(text) || [...fold(text).matchAll(MONEY)].length || /\b(?:gia|ton kho|so luong|con lai)\b.{0,35}\d/.test(folded)) reject('Generated commercial facts', { rule: 'money_or_stock' });
     for (const match of fold(text).matchAll(/\b(?:khuyen mai|giam gia|mien phi|con hang|het hang|san co)\b/g)) {
-        if (!negatedClaim(fold(text).slice(0, match.index))) reject('Generated commercial facts');
+        if (!negatedClaim(fold(text).slice(0, match.index))) reject('Generated commercial facts', { rule: 'commercial_claim' });
     }
-    if (/\bcon\s+\d+\s+(?:san pham|goi|hop|chai|tui)|\b\d+\s+(?:san pham|goi|hop|chai|tui)\s+(?:trong kho|san co)\b/.test(folded)) reject('Generated inventory');
+    if (/\bcon\s+\d+\s+(?:san pham|goi|hop|chai|tui)|\b\d+\s+(?:san pham|goi|hop|chai|tui)\s+(?:trong kho|san co)\b/.test(folded)) reject('Generated inventory', { rule: 'inventory_count' });
     assertNoInventedName(text, context);
     for (const clause of text.split(/[.!?;,\n]+|\b(?:nhưng|tuy nhiên|tuy vậy|nhung|tuy nhien|tuy vay)\b/iu)) {
         const s = normalizeText(clause);
         // Concrete medications and dosages remain hard failures even inside a
         // disclaimer. A cautious opener cannot launder a later instruction.
         const diagnosis = /\b(?:meo|cho|be|thu cung)(?: cua ban)?(?: dang| da)? (?:bi|mac) (?:benh|viem|suy|nhiem|parvo|carre|tieu duong)\b/g;
-        for (const match of s.matchAll(diagnosis)) if (!/^neu\b/.test(s) && !negatedClaim(s.slice(0, match.index))) reject('Diagnosis or medication instruction');
+        for (const match of s.matchAll(diagnosis)) if (!/^neu\b/.test(s) && !negatedClaim(s.slice(0, match.index))) reject('Diagnosis or medication instruction', { rule: 'diagnosis' });
         const claims = [
-            /\b(?:chac chan|dam bao|hoan toan an toan|dieu tri duoc)\b/g,
-            /\b(?:tri benh|chua benh|dieu tri|tang mien dich|bo than|ngan ngua benh|giam can hieu qua|chua viem|tri viem)\b/g,
-            /\b(?:ke don|lieu dung|chan doan la)\b/g
+            ['medical_or_efficacy_claim', /\b(?:chac chan|dam bao|hoan toan an toan|dieu tri duoc)\b/g],
+            ['medical_or_efficacy_claim', /\b(?:tri benh|chua benh|dieu tri|tang mien dich|bo than|ngan ngua benh|giam can hieu qua|chua viem|tri viem)\b/g],
+            ['diagnosis_claim', /\b(?:ke don|lieu dung|chan doan la)\b/g]
         ];
-        if (/\bthuoc\b/.test(s)) claims.push(/\bcho uong\b/g);
-        if (/\b(?:thang|tuoi|giong|benh|meo con|cho con|than|tieu duong|poodle|corgi|husky|pug|alaska|ba tu|anh long ngan)\b/.test(s)) claims.push(/\b(?:phu hop|danh cho|dung duoc|an toan|co the (?:dung|an|su dung))\b/g);
+        if (/\bthuoc\b/.test(s)) claims.push(['medication_claim', /\bcho uong\b/g]);
+        const isSearchOffer = (fieldName === 'follow_up' || clause.trim().endsWith('?')) &&
+            /\b(?:ban\s+)?(?:co\s+)?(?:muon|can)\s+(?:minh\s+)?(?:tim|xem|goi y|tham khao|tu van)\b/.test(s) &&
+            !/\b(?:lua chon thu|san pham nay|loai nay|hat nay|pate nay|pa te nay|benh|than|tieu duong|viem)\b/.test(s);
+        if (/\b(?:thang|tuoi|giong|benh|meo con|cho con|than|tieu duong|poodle|corgi|husky|pug|alaska|ba tu|anh long ngan)\b/.test(s)) {
+            claims.push(['age_breed_suitability', /\b(?:dung duoc|an toan|co the (?:dung|an|su dung))\b/g]);
+            if (!isSearchOffer) claims.push(['age_breed_suitability', /\b(?:phu hop|danh cho)\b/g]);
+        }
         if (/\b(?:san pham|lua chon|loai nay|loai do|hat nay|hat do|pate nay|pate do|pa te nay|pa te do|thuc an nay|thuc an do|thanh phan)\b/.test(s)) {
             // Keep accents for chứa/chưa: folding both to "chua" used to
             // mistake a lack of ingredient data for an ingredient assertion.
             const ingredients = /(?<![\p{L}\p{N}])(?:chứa|chua|thành phần|thanh phan|giàu|giau|bổ sung|bo sung)(?![\p{L}\p{N}]).{0,70}(?:protein|omega|vitamin|canxi|chất|chat)/giu;
-            for (const match of clause.matchAll(ingredients)) if (!negatedClaim(normalizeText(clause.slice(0, match.index)))) reject('Unverified suitability or medical advice');
-            claims.push(/\b(?:ho tro tieu hoa|ho tro mien dich|ho tro xuong khop|ho tro suc khoe|tang cuong suc khoe|tang cuong mien dich|giam rung long|lam dep long|sang long|tot cho than|tot cho gan|giam nguy co|ngan ngua)\b/g);
+            for (const match of clause.matchAll(ingredients)) if (!negatedClaim(normalizeText(clause.slice(0, match.index)))) reject('Unverified suitability or medical advice', { rule: 'ingredients' });
+            claims.push(['efficacy_claim', /\b(?:ho tro tieu hoa|ho tro mien dich|ho tro xuong khop|ho tro suc khoe|tang cuong suc khoe|tang cuong mien dich|giam rung long|lam dep long|sang long|tot cho than|tot cho gan|giam nguy co|ngan ngua)\b/g]);
         }
-        if (clause.toLowerCase().includes('chữa khỏi')) claims.push(/\bchua khoi\b/g);
-        for (const pattern of claims) for (const match of s.matchAll(pattern)) if (!negatedClaim(s.slice(0, match.index))) reject('Unverified suitability or medical advice');
+        if (clause.toLowerCase().includes('chữa khỏi')) claims.push(['medical_or_efficacy_claim', /\bchua khoi\b/g]);
+        for (const [rule, pattern] of claims) for (const match of s.matchAll(pattern)) if (!negatedClaim(s.slice(0, match.index))) reject('Unverified suitability or medical advice', { rule });
     }
 }
 
 function validatePlan(response, context) {
-    if (response?.promptFeedback?.blockReason || response?.candidates?.[0]?.finishReason !== 'STOP' || typeof response.text !== 'string' || response.text.length > 7000) reject('Invalid model response');
+    if (response?.promptFeedback?.blockReason || response?.candidates?.[0]?.finishReason !== 'STOP' || typeof response.text !== 'string' || response.text.length > 7000) reject('Invalid model response', { rule: 'response_envelope' });
     let plan;
-    try { plan = JSON.parse(response.text); } catch { reject('Invalid model response'); }
+    try { plan = JSON.parse(response.text); } catch { reject('Invalid model response', { rule: 'response_json' }); }
     const keys = ['advice', 'product_ids', 'follow_up', 'warnings'];
-    if (!plan || typeof plan !== 'object' || Array.isArray(plan) || Object.keys(plan).length !== 4 || Object.keys(plan).some(key => !keys.includes(key))) reject('Unexpected model fields');
-    if (context.intent === 'website_help' && (context.mode !== 'care' || !context.website_guides?.length)) reject('Unverified website instruction');
-    const selected = selectedProducts(plan, context);
-    const prepare = (value, max, nullable = false) => {
-        const safe = safeText(value, max, nullable);
-        if (safe === null) return null;
-        assertNoConcreteMedication(safe);
-        const text = replaceVerifiedCardFacts(removeVerifiedBudget(safe, context), selected);
-        validateProse(text, context);
-        return text;
+    if (!plan || typeof plan !== 'object' || Array.isArray(plan) || Object.keys(plan).length !== 4 || Object.keys(plan).some(key => !keys.includes(key))) reject('Unexpected model fields', { rule: 'plan_keys' });
+    if (context.intent === 'website_help' && (context.mode !== 'care' || !context.website_guides?.length)) reject('Unverified website instruction', { rule: 'website_guides_missing' });
+    let selected;
+    try { selected = selectedProducts(plan, context); }
+    catch (error) {
+        if (error && !error.field) error.field = 'product_ids';
+        if (error && !error.rule) error.rule = 'ungrounded_products';
+        throw error;
+    }
+    const prepare = (value, max, nullable = false, field = 'advice') => {
+        try {
+            const safe = safeText(value, max, nullable);
+            if (safe === null) return null;
+            assertNoConcreteMedication(safe);
+            const text = replaceVerifiedCardFacts(removeVerifiedBudget(safe, context), selected);
+            validateProse(text, context, field);
+            return text;
+        } catch (error) {
+            if (error && !error.field) error.field = field;
+            if (error && !error.rule && error.message === 'Unverified website instruction') error.rule = 'website_page_instruction';
+            throw error;
+        }
     };
-    plan.advice = prepare(plan.advice, 1800);
-    plan.follow_up = prepare(plan.follow_up, 250, true);
-    if (!Array.isArray(plan.warnings) || plan.warnings.length > 2) reject('Invalid warnings');
-    plan.warnings = plan.warnings.map(warning => prepare(warning, 300));
+    plan.advice = prepare(plan.advice, 1800, false, 'advice');
+    plan.follow_up = prepare(plan.follow_up, 250, true, 'follow_up');
+    if (!Array.isArray(plan.warnings) || plan.warnings.length > 2) reject('Invalid warnings', { rule: 'warnings_array', field: 'warnings' });
+    plan.warnings = plan.warnings.map(warning => prepare(warning, 300, false, 'warnings'));
     return plan;
 }
 

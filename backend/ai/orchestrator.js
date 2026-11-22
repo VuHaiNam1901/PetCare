@@ -99,6 +99,9 @@ function createOrchestrator({ generate = createGeminiAdapter(), repository = cre
             const comparedIds = new Set();
             const observedPets = new Map();
             let catalogObserved = false;
+            const savedPetIndex = userId && typeof petTools.listPetIndex === 'function'
+                ? await petTools.listPetIndex({ userId })
+                : [];
             const seenCalls = new Set();
             const contents = [];
             let preparing = memoryCore.needsCompaction(memory);
@@ -120,6 +123,7 @@ function createOrchestrator({ generate = createGeminiAdapter(), repository = cre
                     capabilities: { contact_human: false, execute_transactions: false, read_account_orders: false,
                         read_user_pets: Boolean(userId),
                         website_usage_guides: true, verified_store_policies: false, current_page_awareness: Boolean(pageContext) },
+                    ...(savedPetIndex.length ? { saved_pet_index: savedPetIndex } : {}),
                     ...(pageContext ? { current_page: pageContext } : {}),
                     historical_product_facts_are_current: false,
                 }) }] };
@@ -201,7 +205,6 @@ function createOrchestrator({ generate = createGeminiAdapter(), repository = cre
                         shape(args, ['mode', 'intent', 'advice', 'product_ids', 'follow_up', 'warnings']);
                         check(['care', 'product'].includes(args.mode) && INTENTS.includes(args.intent));
                         check(Array.isArray(args.warnings) && args.warnings.length <= 2);
-                        check(args.mode !== 'product' || catalogObserved, 'GROUNDING_REJECTED');
                         if (args.intent === 'compare' && Array.isArray(args.product_ids) && args.product_ids.length) {
                             check(args.product_ids.every(id => comparedIds.has(id)), 'GROUNDING_REJECTED');
                         }
@@ -211,8 +214,15 @@ function createOrchestrator({ generate = createGeminiAdapter(), repository = cre
                         const search = {};
                         if (confirmedBudget?.min !== null && confirmedBudget?.min !== undefined) search.minPrice = confirmedBudget.min;
                         if (confirmedBudget?.max !== null && confirmedBudget?.max !== undefined) search.maxPrice = confirmedBudget.max;
+                        const mergedPetProfiles = [
+                            ...savedPetIndex.map(pet => ({ pet_id: pet.pet_id, name: pet.name })),
+                            ...observedPets.values(),
+                        ];
                         let plan;
                         try {
+                            if (args.mode === 'product' && !catalogObserved) {
+                                throw Object.assign(new Error('Ungrounded products'), { rule: 'catalog_not_observed', field: 'mode' });
+                            }
                             // List ordinals are formatting, not stock/price claims.
                             // Keep all numbers within sentences for the existing fact guard.
                             const advice = typeof args.advice === 'string'
@@ -220,16 +230,35 @@ function createOrchestrator({ generate = createGeminiAdapter(), repository = cre
                             plan = measureSync('grounding_ms', () => validatePlan({ text: JSON.stringify({ advice, product_ids: args.product_ids, follow_up: args.follow_up, warnings: args.warnings }), candidates: [{ finishReason: 'STOP' }] },
                                 { mode: args.mode, intent: args.intent, products: [...evidence.values()], search,
                                     website_guides: [...websiteGuides.values()], page_context: pageContext,
-                                    pet_profiles: [...observedPets.values()] }));
+                                    pet_profiles: mergedPetProfiles }));
                         }
                         catch (error) {
+                            const reason = rejectionCode(error);
+                            console.warn('[CHAT GROUNDING REJECT]', JSON.stringify({
+                                stage: lastRound ? 'final' : 'retry',
+                                round: round + 1,
+                                reason,
+                                field: error?.field || 'unknown',
+                                rule: error?.rule || 'unknown',
+                                mode: args.mode,
+                                intent: args.intent,
+                                catalog_observed: catalogObserved,
+                                observed_pets: observedPets.size,
+                                evidence: evidence.size,
+                            }));
                             if (lastRound) throw failure('GROUNDING_REJECTED');
+                            let guidance = 'Viết lại ngắn gọn bằng tiếng Việt. Không nhắc tên/nhãn hiệu, kể cả tên không tìm thấy; không viết số tiền, ngay cả giới hạn ngân sách, hoặc số tồn và khẳng định còn/hết hàng. Không dùng placeholder [product:...]. Các dữ kiện nằm trong thẻ; chỉ gọi ngân sách là "ngân sách bạn đã nêu". Chỉ dùng ID đã xác minh; so sánh theo thứ tự thẻ và kết quả compare_products. Nếu không có kết quả, chỉ nói chưa tìm được sản phẩm phù hợp yêu cầu.';
+                            if (args.intent === 'website_help') {
+                                guidance = 'Diễn đạt lại guides và current_page của lượt này. Chỉ chỉ dẫn bấm nút đang visible=true, enabled=true trên trang hiện tại; nếu đi tới trang khác phải nói rõ trang đích. Không dùng trạng thái/quyền hủy từ lịch sử hoặc frontend. Không bịa URL/số liệu/chính sách, không nói đã thao tác, không gợi ý VNPAY. Dùng mode=care, product_ids=[]. Nếu chưa có guides, gọi get_website_guide; nếu thiếu ngữ cảnh, hỏi làm rõ.';
+                            } else if (error?.rule === 'catalog_not_observed') {
+                                guidance = 'Chưa có sản phẩm catalog được đọc trong lượt này. Nếu chỉ trả lời thông tin hồ sơ thú cưng hoặc hỏi làm rõ, dùng mode="care", product_ids=[]. Nếu muốn gợi ý sản phẩm, gọi search_products trước.';
+                            } else if (reason === 'Unverified suitability or medical advice') {
+                                guidance = 'Không ghép đặc điểm tuổi/giống thú cưng với khẳng định sản phẩm "phù hợp/dành cho/an toàn/có thể dùng" trong cùng câu. Tách câu mô tả hồ sơ thú cưng riêng; phần tư vấn chỉ nêu thông tin chung trung thực và follow_up trung tính.';
+                            }
                             replies.push({ functionResponse: { ...(call.id === undefined ? {} : { id: call.id }), name: call.name,
-                                response: { status: 'invalid_response', reason: rejectionCode(error),
+                                response: { status: 'invalid_response', reason,
                                     verified_product_ids: [...evidence.keys()],
-                                    message: args.intent === 'website_help'
-                                        ? 'Diễn đạt lại guides và current_page của lượt này. Chỉ chỉ dẫn bấm nút đang visible=true, enabled=true trên trang hiện tại; nếu đi tới trang khác phải nói rõ trang đích. Không dùng trạng thái/quyền hủy từ lịch sử hoặc frontend. Không bịa URL/số liệu/chính sách, không nói đã thao tác, không gợi ý VNPAY. Dùng mode=care, product_ids=[]. Nếu chưa có guides, gọi get_website_guide; nếu thiếu ngữ cảnh, hỏi làm rõ.'
-                                        : 'Viết lại ngắn gọn bằng tiếng Việt. Không nhắc tên/nhãn hiệu, kể cả tên không tìm thấy; không viết số tiền, ngay cả giới hạn ngân sách, hoặc số tồn và khẳng định còn/hết hàng. Không dùng placeholder [product:...]. Các dữ kiện nằm trong thẻ; chỉ gọi ngân sách là "ngân sách bạn đã nêu". Chỉ dùng ID đã xác minh; so sánh theo thứ tự thẻ và kết quả compare_products. Nếu không có kết quả, chỉ nói chưa tìm được sản phẩm phù hợp yêu cầu.' } } });
+                                    message: guidance } } });
                             continue;
                         }
                         const products = plan.product_ids.map(id => {

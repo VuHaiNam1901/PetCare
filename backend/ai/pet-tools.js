@@ -30,6 +30,22 @@ function projectPetForAi(pet) {
 
 function createPetTools({ petModel = defaultPetModel } = {}) {
     return {
+        async listPetIndex({ userId } = {}) {
+            if (!Number.isInteger(userId) || userId <= 0) return [];
+            try {
+                const allPets = await petModel.listByUser(userId);
+                return allPets.slice(0, 20).map(pet => ({
+                    pet_id: Number(pet.pet_id),
+                    name: pet.name,
+                    species_name: pet.species_name,
+                    is_default: Boolean(pet.is_default),
+                }));
+            } catch (error) {
+                if (error?.code === 'PET_PROFILE_NOT_READY') return [];
+                return [];
+            }
+        },
+
         async execute(args = {}, { userId } = {}) {
             if (!Number.isInteger(userId) || userId <= 0) {
                 return {
