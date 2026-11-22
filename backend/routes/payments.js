@@ -16,6 +16,7 @@ const handle = action => async (req, res, next) => {
 };
 
 router.get('/:id/payment', handle(async (req, res) => {
+    res.set('Cache-Control', 'no-store');
     res.json({ success: true, payment: await payments.get(req.user.user_id, Number(req.params.id)) });
 }));
 router.post('/:id/payment/simulate', handle(async (req, res) => {

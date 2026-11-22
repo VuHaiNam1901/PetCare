@@ -222,6 +222,17 @@
   font-size: 12px;
 }
 
+.sepay-test-qr .sepay-test-qr-auto {
+  margin: 0 0 10px;
+  padding: 9px 12px;
+  border: 1px solid #bfdbfe;
+  border-radius: 8px;
+  background: #eff8ff;
+  color: #12659d;
+  font-size: 12px;
+  font-weight: 600;
+}
+
 .sepay-test-qr .sepay-test-refresh-btn {
   width: 100%;
   min-height: 42px;

@@ -499,8 +499,8 @@ export function CommerceProvider({ children }) {
     if (!positive(id)) throw Object.assign(new Error('Mã đơn hàng không hợp lệ.'), { status: 400 });
     return `/api/orders/${id}`;
   }
-  const getOrder = (orderId, { signal } = {}) => readAccountOrder(orderPath(orderId), signal);
-  const getOrderPayment = (orderId, { signal } = {}) => readAccountOrder(`${orderPath(orderId)}/payment`, signal);
+  const getOrder = (orderId, { signal } = {}) => readAccountOrder(orderPath(orderId), signal, { cache: 'no-store' });
+  const getOrderPayment = (orderId, { signal } = {}) => readAccountOrder(`${orderPath(orderId)}/payment`, signal, { cache: 'no-store' });
   const assertWishlistSession = () => {
     if (sessionStorage.getItem(TOKEN_KEY) !== tokenRef.current) throw Object.assign(new Error('Phiên làm việc đã thay đổi.'), { obsolete: true });
   };

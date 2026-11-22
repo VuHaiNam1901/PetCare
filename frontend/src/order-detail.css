@@ -15,6 +15,10 @@
 .order-detail-cancel-button, .order-cancel-confirm { color: #9a3531; border: 1px solid #d89690; background: #fff5f3; }
 .order-detail-cancel-button:hover, .order-cancel-confirm:hover { background: #ffe8e4; }
 .order-cancel-success { margin-bottom: 20px; padding: 14px 18px; border: 1px solid #bfe5cc; border-radius: 6px; background: #f1fbf4; color: #1e6b3b; font-size: 12px; }
+.order-payment-success { display: flex; align-items: flex-start; gap: 10px; margin-bottom: 20px; padding: 14px 18px; border: 1px solid #bfe5cc; border-radius: 6px; background: #f1fbf4; color: #1e6b3b; font-size: 12px; }
+.order-payment-success svg { flex-shrink: 0; margin-top: 2px; }
+.order-payment-success strong { display: block; font-size: 13px; margin-bottom: 3px; }
+.order-payment-success p { margin: 0; line-height: 1.65; }
 .order-cancel-dialog { box-sizing: border-box; width: min(520px, calc(100vw - 32px)); max-height: calc(100dvh - 32px); margin: auto; padding: 25px; border: 1px solid var(--color-border); border-radius: 10px; background: #fff; color: var(--color-text); overflow-y: auto; }
 .order-cancel-dialog::backdrop { background: rgb(16 31 48 / 48%); }
 .order-cancel-dialog h2 { margin: 0 0 12px; font-size: 20px; }

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { ArrowLeft, CalendarDays, Check, ChevronRight, CircleX, CreditCard, Info, MapPin, Package, RefreshCw, Truck, UserRound } from 'lucide-react';
+import { ArrowLeft, CalendarDays, Check, CheckCircle2, ChevronRight, CircleX, CreditCard, Info, MapPin, Package, RefreshCw, Truck, UserRound } from 'lucide-react';
 import { useCommerce } from '../context/CommerceContext.jsx';
 import { ErrorNotice } from '../components/Feedback.jsx';
 import { OrderHistory, OrderItems, OrderStatusBadge, OrdersLoading } from '../components/OrderContent.jsx';
@@ -11,6 +11,47 @@ import { BRAND_NAME } from '../config/branding.js';
 import { useChatPageState } from '../context/ChatPageContext.jsx';
 import '../my-orders.css';
 import '../order-detail.css';
+
+const PAYMENT_POLL_INTERVAL_MS = 4000;
+
+function isValidOrder(value, ownerId, id) {
+  return Boolean(
+    value && value.user_id === ownerId && value.order_id === id && Array.isArray(value.items) &&
+    typeof value.total_amount === 'string' && (value.workflow_version == null || value.workflow_version === 2) &&
+    (value.subtotal_amount == null || typeof value.subtotal_amount === 'string') &&
+    (value.discount_amount == null || typeof value.discount_amount === 'string') &&
+    (value.voucher_code_snapshot == null || typeof value.voucher_code_snapshot === 'string') &&
+    (value.refunds == null || Array.isArray(value.refunds)) &&
+    !value.items.some(item => !item || !Number.isSafeInteger(item.product_id) || !Number.isSafeInteger(item.quantity) || item.quantity <= 0)
+  );
+}
+
+function isValidPayment(value, id, originalOrder) {
+  return Boolean(
+    value && value.order_id === id && value.payment_method === originalOrder.payment_method &&
+    value.amount === originalOrder.total_amount && typeof value.order_status === 'string' &&
+    typeof value.payment_status === 'string' && typeof value.can_simulate === 'boolean' &&
+    (value.workflow_version == null || originalOrder.workflow_version == null || value.workflow_version === originalOrder.workflow_version) &&
+    (value.refunds == null || Array.isArray(value.refunds))
+  );
+}
+
+function isAwaitingPaymentSnapshot(payment) {
+  return Boolean(
+    payment && payment.order_status === 'Chờ thanh toán' &&
+    ['Chưa thanh toán', 'Thất bại'].includes(payment.payment_status) &&
+    !payment.transaction_date
+  );
+}
+
+function isPaymentConfirmedPaid(payment) {
+  return Boolean(
+    payment && payment.payment_status === 'Đã thanh toán' &&
+    Boolean(payment.transaction_date) &&
+    payment.order_status !== 'Chờ thanh toán' &&
+    payment.order_status !== 'Đã hủy'
+  );
+}
 
 const refundStatusLabels = {
   requested: 'Chờ xử lý hoàn tiền',
@@ -114,7 +155,7 @@ function OrderProgress({ order }) {
   </section>;
 }
 
-function PaymentDetails({ order, state, onRetry, paymentOpen, onOpenPayment, onClosePayment }) {
+function PaymentDetails({ order, state, onRetry, paymentOpen, onOpenPayment, onClosePayment, autoChecking = false }) {
   const payment = state?.value;
   const sepayQr = getSePayQr(order, payment);
   const sepayStatus = getSePayStatus(order, payment);
@@ -139,7 +180,7 @@ function PaymentDetails({ order, state, onRetry, paymentOpen, onOpenPayment, onC
     notice = 'Bạn thanh toán khi nhận hàng. Trạng thái thu tiền được cập nhật từ cửa hàng.';
   } else if (sepayQr) {
     notice = sepayQr.mode === 'live'
-      ? 'Vui lòng chuyển khoản đúng số tiền và nội dung của đơn hàng. Cập nhật trạng thái sau khi chuyển khoản để xem kết quả.'
+      ? 'Vui lòng chuyển khoản đúng số tiền và nội dung của đơn hàng. Hệ thống sẽ tự động cập nhật sau khi ngân hàng xác nhận giao dịch.'
       : sepayQr.reconciliationOnly
       ? 'Đơn Online đang dùng QR DEMO / TEST của SePay trong môi trường thử nghiệm. Chỉ đối chiếu giao dịch giả, chưa xác nhận thanh toán.'
       : 'Đơn Online đang chờ Webhook hợp lệ từ SePay Test Mode. Việc mở hoặc tải QR không xác nhận thanh toán.';
@@ -163,7 +204,7 @@ function PaymentDetails({ order, state, onRetry, paymentOpen, onOpenPayment, onC
     {state?.error ? <div className="order-detail-payment-error"><ErrorNotice title="Chưa kiểm tra được thanh toán" message={state.error} onRetry={onRetry} /></div> : notice && <div className="order-detail-payment-note" role="status"><Info size={16} aria-hidden="true" /><p>{notice}</p></div>}
     {sepayQr && payment.can_pay === true && !state?.loading && !state?.error && <>
       <button className="button button-primary" type="button" onClick={onOpenPayment}>Thanh toán ngay</button>
-      {paymentOpen && <SePayPaymentDialog key={`${sepayQr.mode}:${sepayQr.orderId}:${sepayQr.expiresAt}`} qr={sepayQr} onRefresh={onRetry} onClose={onClosePayment} />}
+      {paymentOpen && <SePayPaymentDialog key={`${sepayQr.mode}:${sepayQr.orderId}:${sepayQr.expiresAt}`} qr={sepayQr} autoChecking={autoChecking} onRefresh={onRetry} onClose={onClosePayment} />}
     </>}
     {sepayStatus && !sepayQr && !state?.loading && !state?.error && <SePayStatus status={sepayStatus} onRefresh={onRetry} />}
     {refunds.length > 0 && <div className="order-detail-refund-block">
@@ -190,9 +231,9 @@ function PaymentDetails({ order, state, onRetry, paymentOpen, onOpenPayment, onC
 }
 
 export default function OrderDetailPage({ orderId }) {
-  const { user, authLoading, getOrder, getOrderPayment, cancelOrder } = useCommerce();
-  const readers = useRef({ getOrder, getOrderPayment, cancelOrder });
-  readers.current = { getOrder, getOrderPayment, cancelOrder };
+  const { user, authLoading, getOrder, getOrderPayment, cancelOrder, notify } = useCommerce();
+  const readers = useRef({ getOrder, getOrderPayment, cancelOrder, notify });
+  readers.current = { getOrder, getOrderPayment, cancelOrder, notify };
   const validId = /^[1-9]\d*$/.test(orderId || '') && Number(orderId) <= 2147483647;
   const id = validId ? Number(orderId) : null;
   const [retry, setRetry] = useState(0);
@@ -203,7 +244,11 @@ export default function OrderDetailPage({ orderId }) {
   const [cancellation, setCancellation] = useState(null);
   const [cancelReasonValid, setCancelReasonValid] = useState(false);
   const [cancellationNotice, setCancellationNotice] = useState(null);
+  const [paymentSuccessNotice, setPaymentSuccessNotice] = useState(null);
   const cancellationRequest = useRef(null);
+  const paymentTrackingRef = useRef({ key: '', sawAwaiting: false, notifiedPaid: false });
+  const skipPaymentRefetchForOrderRef = useRef(null);
+  const orderSyncControllerRef = useRef(null);
   const current = result && user && result.ownerId === user.user_id && result.orderId === id ? result : null;
   const originalOrder = current?.order;
   const paymentState = paymentResult && user && paymentResult.ownerId === user.user_id && paymentResult.order === originalOrder ? paymentResult : null;
@@ -230,6 +275,25 @@ export default function OrderDetailPage({ orderId }) {
   const loading = authLoading || !current || current.loading;
   const activeCancellation = cancellation?.ownerId === user?.user_id && cancellation?.orderId === id ? cancellation : null;
   const activeNotice = cancellationNotice?.ownerId === user?.user_id && cancellationNotice?.orderId === id ? cancellationNotice.message : '';
+  const activePaymentSuccess = paymentSuccessNotice?.ownerId === user?.user_id && paymentSuccessNotice?.orderId === id ? paymentSuccessNotice.message : '';
+  const activeSePayQr = order && payment ? getSePayQr(order, payment) : null;
+  const activeSePayStatus = order && payment ? getSePayStatus(order, payment) : null;
+  const paymentDeadlineMs = typeof order?.payment_expires_at === 'string' ? Date.parse(order.payment_expires_at) : NaN;
+  const paymentWindowExpired = Number.isFinite(paymentDeadlineMs) && paymentDeadlineMs <= Date.now();
+  const shouldPollPayment = Boolean(
+    !authLoading && user && user.role === 'user' && validId && id != null &&
+    originalOrder && paymentState && !paymentState.loading && !paymentState.error && payment &&
+    !activeCancellation &&
+    order.workflow_version === 2 && order.payment_method === 'ONLINE' &&
+    order.status === 'Chờ thanh toán' && ['Chưa thanh toán', 'Thất bại'].includes(order.payment_status) &&
+    !order.transaction_date && !order.approved_at &&
+    order.approval_state !== 'rejected' && !order.rejection_reason &&
+    !paymentWindowExpired &&
+    (
+      (activeSePayQr && payment.can_pay === true && activeSePayQr.reconciliationOnly === false) ||
+      (activeSePayStatus && !activeSePayStatus.reviewRequired && activeSePayStatus.disposition === 'applied' && payment.payment_status !== 'Đã thanh toán')
+    )
+  );
   useChatPageState({ phase: !validId || current?.status === 404 ? 'not_found' : loading ? 'loading' : current?.error ? 'error' : 'ready',
     busy: Boolean(activeCancellation?.busy), cancel_dialog: Boolean(activeCancellation), cancel_error: Boolean(activeCancellation?.error),
     cancel_reason_valid: cancelReasonValid, cancel_visible: order?.can_cancel === true });
@@ -237,7 +301,16 @@ export default function OrderDetailPage({ orderId }) {
   useEffect(() => {
     setCancellation(null);
     setCancellationNotice(null);
-    return () => { cancellationRequest.current = null; };
+    setPaymentSuccessNotice(null);
+    paymentTrackingRef.current = { key: `${user?.user_id || ''}:${id || ''}`, sawAwaiting: false, notifiedPaid: false };
+    skipPaymentRefetchForOrderRef.current = null;
+    orderSyncControllerRef.current?.abort();
+    orderSyncControllerRef.current = null;
+    return () => {
+      cancellationRequest.current = null;
+      orderSyncControllerRef.current?.abort();
+      orderSyncControllerRef.current = null;
+    };
   }, [user?.user_id, id]);
 
   function closePayment() {
@@ -245,6 +318,24 @@ export default function OrderDetailPage({ orderId }) {
     const url = new URL(window.location.href);
     url.searchParams.delete('payment');
     window.history.replaceState(null, '', `${url.pathname}${url.search}${url.hash}`);
+  }
+
+  function syncOrderHistory(ownerId, targetOrderId) {
+    orderSyncControllerRef.current?.abort();
+    const controller = new AbortController();
+    orderSyncControllerRef.current = controller;
+    readers.current.getOrder(targetOrderId, { signal: controller.signal }).then(data => {
+      if (controller.signal.aborted || orderSyncControllerRef.current !== controller) return;
+      const freshOrder = data.order;
+      if (!isValidOrder(freshOrder, ownerId, targetOrderId)) return;
+      skipPaymentRefetchForOrderRef.current = freshOrder;
+      setResult(prev => (prev && prev.ownerId === ownerId && prev.orderId === targetOrderId && !prev.loading
+        ? { ...prev, order: freshOrder }
+        : prev));
+      setPaymentResult(prev => (prev && prev.ownerId === ownerId ? { ...prev, order: freshOrder } : prev));
+    }).catch(() => {
+      // Payment card state is already synced from /payment; ignore background history sync errors.
+    });
   }
 
   async function confirmCancellation(payload) {
@@ -262,6 +353,7 @@ export default function OrderDetailPage({ orderId }) {
       setPaymentResult(null);
       setResult({ ...request, loading: false, order: updated, error: '', status: null });
       setCancellation(null);
+      setPaymentSuccessNotice(null);
       setCancellationNotice({ ...request, message: 'Đã hủy đơn hàng thành công.' });
     } catch (error) {
       if (cancellationRequest.current !== request || error.obsolete || [401, 403].includes(error.status)) return;
@@ -292,13 +384,7 @@ export default function OrderDetailPage({ orderId }) {
     readers.current.getOrder(id, { signal: controller.signal }).then(data => {
       if (!alive) return;
       const value = data.order;
-      if (!value || value.user_id !== ownerId || value.order_id !== id || !Array.isArray(value.items) ||
-        typeof value.total_amount !== 'string' || (value.workflow_version != null && value.workflow_version !== 2) ||
-        (value.subtotal_amount != null && typeof value.subtotal_amount !== 'string') ||
-        (value.discount_amount != null && typeof value.discount_amount !== 'string') ||
-        (value.voucher_code_snapshot != null && typeof value.voucher_code_snapshot !== 'string') ||
-        (value.refunds != null && !Array.isArray(value.refunds)) ||
-        value.items.some(item => !item || !Number.isSafeInteger(item.product_id) || !Number.isSafeInteger(item.quantity) || item.quantity <= 0)) {
+      if (!isValidOrder(value, ownerId, id)) {
         throw new Error('Dữ liệu đơn hàng chưa hợp lệ. Vui lòng thử lại.');
       }
       setResult({ ownerId, orderId: id, loading: false, order: value, error: '', status: null });
@@ -311,6 +397,10 @@ export default function OrderDetailPage({ orderId }) {
 
   useEffect(() => {
     if (authLoading || !user || user.role !== 'user' || !originalOrder) return;
+    if (skipPaymentRefetchForOrderRef.current === originalOrder) {
+      skipPaymentRefetchForOrderRef.current = null;
+      return;
+    }
     const ownerId = user.user_id;
     const controller = new AbortController();
     let alive = true;
@@ -318,11 +408,7 @@ export default function OrderDetailPage({ orderId }) {
     readers.current.getOrderPayment(id, { signal: controller.signal }).then(data => {
       if (!alive) return;
       const value = data.payment;
-      if (!value || value.order_id !== id || value.payment_method !== originalOrder.payment_method ||
-        value.amount !== originalOrder.total_amount || typeof value.order_status !== 'string' ||
-        typeof value.payment_status !== 'string' || typeof value.can_simulate !== 'boolean' ||
-        (value.workflow_version != null && originalOrder.workflow_version != null && value.workflow_version !== originalOrder.workflow_version) ||
-        (value.refunds != null && !Array.isArray(value.refunds))) {
+      if (!isValidPayment(value, id, originalOrder)) {
         throw new Error('Thông tin thanh toán cần được kiểm tra lại. Vui lòng thử lại.');
       }
       setPaymentResult({ ownerId, order: originalOrder, loading: false, value, error: '' });
@@ -333,14 +419,152 @@ export default function OrderDetailPage({ orderId }) {
     return () => { alive = false; controller.abort(); };
   }, [authLoading, user?.user_id, user?.role, id, originalOrder, paymentRetry]);
 
+  useEffect(() => {
+    if (!paymentState || paymentState.loading || paymentState.error || !payment || !user || user.role !== 'user') return;
+    const currentKey = `${user.user_id}:${id}`;
+    if (paymentTrackingRef.current.key !== currentKey) {
+      paymentTrackingRef.current = { key: currentKey, sawAwaiting: false, notifiedPaid: false };
+    }
+    if (isAwaitingPaymentSnapshot(payment)) {
+      paymentTrackingRef.current.sawAwaiting = true;
+    } else if (isPaymentConfirmedPaid(payment) && paymentTrackingRef.current.sawAwaiting && !paymentTrackingRef.current.notifiedPaid) {
+      paymentTrackingRef.current.notifiedPaid = true;
+      setPaymentSuccessNotice({ ownerId: user.user_id, orderId: id, message: 'Thanh toán thành công!' });
+      readers.current.notify('Thanh toán thành công!', 'success');
+      if (paymentOpen || new URLSearchParams(window.location.search).get('payment') === '1') {
+        closePayment();
+      }
+      return;
+    }
+    if (paymentOpen && !activeSePayQr) {
+      closePayment();
+    }
+  }, [user?.user_id, user?.role, id, paymentState, payment, paymentOpen, activeSePayQr]);
+
+  useEffect(() => {
+    if (!shouldPollPayment || !user || user.role !== 'user' || !originalOrder) return;
+    const ownerId = user.user_id;
+    let alive = true;
+    let inFlight = false;
+    let timerId = null;
+    let activeController = null;
+
+    function clearPollTimer() {
+      if (timerId !== null) {
+        window.clearTimeout(timerId);
+        timerId = null;
+      }
+    }
+
+    function stopPolling() {
+      alive = false;
+      clearPollTimer();
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      activeController?.abort();
+      activeController = null;
+    }
+
+    function scheduleNext() {
+      clearPollTimer();
+      if (!alive || document.visibilityState === 'hidden') return;
+      if (Number.isFinite(paymentDeadlineMs) && Date.now() >= paymentDeadlineMs) {
+        pollOnce(true);
+        return;
+      }
+      const delay = Number.isFinite(paymentDeadlineMs)
+        ? Math.max(0, Math.min(PAYMENT_POLL_INTERVAL_MS, paymentDeadlineMs - Date.now()))
+        : PAYMENT_POLL_INTERVAL_MS;
+      timerId = window.setTimeout(() => {
+        timerId = null;
+        if (!alive || document.visibilityState === 'hidden') return;
+        const expiredAtTick = Number.isFinite(paymentDeadlineMs) && Date.now() >= paymentDeadlineMs;
+        pollOnce(expiredAtTick);
+      }, delay);
+    }
+
+    function pollOnce(finalCheck = false) {
+      if (!alive || inFlight) return;
+      inFlight = true;
+      activeController?.abort();
+      const controller = new AbortController();
+      activeController = controller;
+      const release = () => {
+        if (activeController === controller) activeController = null;
+        inFlight = false;
+      };
+      readers.current.getOrderPayment(id, { signal: controller.signal }).then(data => {
+        release();
+        if (!alive || controller.signal.aborted) return;
+        const value = data.payment;
+        if (!isValidPayment(value, id, originalOrder)) {
+          if (finalCheck) stopPolling();
+          else scheduleNext();
+          return;
+        }
+        setPaymentResult({ ownerId, order: originalOrder, loading: false, value, error: '' });
+        const nextStatus = getSePayStatus({
+          ...originalOrder,
+          status: value.order_status,
+          payment_status: value.payment_status,
+          approval_state: value.approval_state ?? originalOrder.approval_state,
+          rejection_reason: value.rejection_reason ?? originalOrder.rejection_reason,
+          payment_expires_at: value.payment_expires_at ?? originalOrder.payment_expires_at,
+          cancellation_reason_code: value.cancellation_reason_code ?? originalOrder.cancellation_reason_code,
+          workflow_version: value.workflow_version ?? originalOrder.workflow_version,
+        }, value);
+        const stillAwaiting = value.order_status === 'Chờ thanh toán' &&
+          ['Chưa thanh toán', 'Thất bại'].includes(value.payment_status) &&
+          !value.transaction_date &&
+          !value.approved_at &&
+          value.approval_state !== 'rejected' &&
+          !value.rejection_reason &&
+          !(Number.isFinite(paymentDeadlineMs) && Date.now() >= paymentDeadlineMs) &&
+          !nextStatus?.reviewRequired &&
+          !['expired', 'cancelled', 'rejected', 'paid'].includes(nextStatus?.view);
+        if (!stillAwaiting || finalCheck) {
+          stopPolling();
+          syncOrderHistory(ownerId, id);
+          return;
+        }
+        scheduleNext();
+      }).catch(error => {
+        release();
+        if (!alive || controller.signal.aborted) return;
+        if (error.obsolete || [401, 403, 404, 400].includes(error.status) || finalCheck) {
+          stopPolling();
+          return;
+        }
+        scheduleNext();
+      }).finally(release);
+    }
+
+    function handleVisibilityChange() {
+      if (!alive) return;
+      if (document.visibilityState === 'hidden') {
+        clearPollTimer();
+      } else if (!inFlight) {
+        const expiredNow = Number.isFinite(paymentDeadlineMs) && Date.now() >= paymentDeadlineMs;
+        pollOnce(expiredNow);
+      }
+    }
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    scheduleNext();
+
+    return () => {
+      stopPolling();
+    };
+  }, [shouldPollPayment, user?.user_id, user?.role, id, originalOrder, paymentDeadlineMs]);
+
   const denied = !authLoading && user && user.role !== 'user';
   const notFound = !validId || current?.status === 404 || current?.status === 400;
 
   return <div className="container order-detail-page">
     <nav className="catalog-breadcrumbs" aria-label="Đường dẫn"><a href="/">Trang chủ</a><ChevronRight size={14} aria-hidden="true" /><a href="/my-orders">Đơn hàng của tôi</a><ChevronRight size={14} aria-hidden="true" /><span aria-current="page">Chi tiết đơn hàng</span></nav>
     <div className="order-detail-page-heading"><div><p className="my-orders-eyebrow">ĐƠN HÀNG CỦA BẠN</p><h1>Chi tiết đơn hàng</h1><p>Theo dõi đơn hàng và thông tin giao nhận của bạn.</p></div><a className="button button-outline order-detail-back" href="/my-orders"><ArrowLeft size={16} aria-hidden="true" />Đơn hàng của tôi</a></div>
-    {authLoading || !user ? <OrdersLoading className="order-detail-loading" label="Đang tải chi tiết đơn hàng" /> : denied ? <section className="my-orders-state"><UserRound size={36} aria-hidden="true" /><h2>Đơn hàng dành cho tài khoản khách hàng</h2><p>Vui lòng đăng nhập bằng tài khoản khách hàng để xem đơn hàng của mình.</p></section> : notFound ? <section className="my-orders-state order-detail-not-found"><Package size={38} aria-hidden="true" /><h2>Không thể mở đơn hàng</h2><p>{validId ? 'Không tìm thấy đơn hàng hoặc bạn không có quyền truy cập.' : 'Mã đơn hàng không hợp lệ. Vui lòng chọn đơn hàng từ danh sách của bạn.'}</p><a className="button button-primary" href="/my-orders">Đơn hàng của tôi</a></section> : loading ? <OrdersLoading className="order-detail-loading" label="Đang tải chi tiết đơn hàng" /> : current.error ? <div className="order-detail-error"><ErrorNotice title="Chưa tải được chi tiết đơn hàng" message={current.error} onRetry={() => setRetry(value => value + 1)} /></div> : order ? <>
-      <section className="order-detail-overview"><div><div className="order-detail-number"><Package size={22} aria-hidden="true" /><h2>Đơn hàng #{order.order_id}</h2></div><p><CalendarDays size={14} aria-hidden="true" />Ngày đặt: {formatOrderDate(order.order_date, true) || 'Chưa có thông tin'}</p></div><div className="order-detail-overview-actions"><OrderStatusBadge order={order} className="order-detail-status" /><button className="order-detail-refresh" type="button" disabled={activeCancellation?.busy} onClick={() => setRetry(value => value + 1)}><RefreshCw size={15} aria-hidden="true" />Cập nhật trạng thái</button>{order.can_cancel === true && <button className="button order-detail-cancel-button" type="button" onClick={() => { setCancellationNotice(null); setCancellation({ ownerId: user.user_id, orderId: id, busy: false, error: '' }); }}>Hủy đơn hàng</button>}</div></section>
+    {authLoading || !user ? <OrdersLoading className="order-detail-loading" label="Đang tải chi tiết đơn hàng" /> : denied ? <section className="my-orders-state"><UserRound size={36} aria-hidden="true" /><h2>Đơn hàng dành cho tài khoản khách hàng</h2><p>Vui lòng đăng nhập bằng tài khoản khách hàng để xem đơn hàng của mình.</p></section> : notFound ? <section className="my-orders-state order-detail-not-found"><Package size={38} aria-hidden="true" /><h2>Không thể mở đơn hàng</h2><p>{validId ? 'Không tìm thấy đơn hàng hoặc bạn không có quyền truy cập.' : 'Mã đơn hàng không hợp lệ. Vui lòng chọn đơn hàng từ danh sách của bạn.'}</p><a className="button button-primary" href="/my-orders">Đơn hàng của tôi</a></section> : loading ? <OrdersLoading className="order-detail-loading" label="Đang tải chi tiết đơn hàng" /> : current.error ? <div className="order-detail-error"><ErrorNotice title="Chưa tải được chi tiết đơn hàng" message={current.error} onRetry={() => { skipPaymentRefetchForOrderRef.current = null; setRetry(value => value + 1); }} /></div> : order ? <>
+      <section className="order-detail-overview"><div><div className="order-detail-number"><Package size={22} aria-hidden="true" /><h2>Đơn hàng #{order.order_id}</h2></div><p><CalendarDays size={14} aria-hidden="true" />Ngày đặt: {formatOrderDate(order.order_date, true) || 'Chưa có thông tin'}</p></div><div className="order-detail-overview-actions"><OrderStatusBadge order={order} className="order-detail-status" /><button className="order-detail-refresh" type="button" disabled={activeCancellation?.busy} onClick={() => { skipPaymentRefetchForOrderRef.current = null; setRetry(value => value + 1); }}><RefreshCw size={15} aria-hidden="true" />Cập nhật trạng thái</button>{order.can_cancel === true && <button className="button order-detail-cancel-button" type="button" onClick={() => { setCancellationNotice(null); setCancellation({ ownerId: user.user_id, orderId: id, busy: false, error: '' }); }}>Hủy đơn hàng</button>}</div></section>
+      {activePaymentSuccess && <div className="order-payment-success" role="status" aria-live="polite"><CheckCircle2 size={18} aria-hidden="true" /><div><strong>{activePaymentSuccess}</strong><p>{order.status === 'Chờ xử lý' && !order.approved_at ? 'Hệ thống đã xác nhận giao dịch thanh toán của bạn. Đơn hàng đang chờ cửa hàng duyệt.' : 'Hệ thống đã xác nhận giao dịch thanh toán cho đơn hàng của bạn.'}</p></div></div>}
       {activeNotice && <p className="order-cancel-success" role="status">{activeNotice}</p>}
       {order.cancellation_reason_code === 'customer_cancelled' && <section className="order-detail-rejection" aria-labelledby="order-cancellation-title"><h2 id="order-cancellation-title">Lý do hủy đơn</h2><p>{order.cancellation_reason || 'Khách hàng yêu cầu hủy đơn.'}</p>{recordedDate(order.cancelled_at) && <p>Thời gian hủy: <RecordedTime value={order.cancelled_at} /></p>}</section>}
       {order.rejection_reason && <section className="order-detail-rejection" aria-labelledby="order-rejection-title"><h2 id="order-rejection-title">Lý do từ chối</h2><p>{order.rejection_reason}</p></section>}
@@ -354,9 +578,9 @@ export default function OrderDetailPage({ orderId }) {
           <div className="order-detail-subtotal"><dt>Tạm tính</dt><dd>{formatOrderMoney(order.subtotal_amount ?? order.total_amount, true)}</dd></div>
           <div className="order-detail-voucher-discount"><dt>Giảm giá Voucher{order.voucher_code_snapshot ? <span className="order-detail-voucher-code">{order.voucher_code_snapshot}</span> : null}</dt><dd>{order.discount_amount == null ? 'Chưa có thông tin' : `−${formatOrderMoney(order.discount_amount, true)}`}</dd></div>
         </> : <div><dt>Tiền hàng</dt><dd>{formatOrderMoney(order.total_amount)}</dd></div>}<div><dt>Phí vận chuyển</dt><dd>Chưa tính</dd></div><div className="order-detail-total"><dt>Tổng tiền hàng</dt><dd>{formatOrderMoney(order.total_amount, hasVoucher)}</dd></div></dl><p className="order-detail-muted">Tổng tiền chưa gồm phí vận chuyển. Phí vận chuyển hiện chưa được quy định.</p></section>
-        <PaymentDetails order={order} state={paymentState} paymentOpen={paymentOpen} onOpenPayment={() => setPaymentOpen(true)} onClosePayment={closePayment} onRetry={() => { setRetry(value => value + 1); setPaymentRetry(value => value + 1); }} />
+        <PaymentDetails order={order} state={paymentState} paymentOpen={paymentOpen} autoChecking={shouldPollPayment} onOpenPayment={() => setPaymentOpen(true)} onClosePayment={closePayment} onRetry={() => { skipPaymentRefetchForOrderRef.current = null; setRetry(value => value + 1); setPaymentRetry(value => value + 1); }} />
       </aside></div>
-      {activeCancellation && <CancelOrderDialog order={order} busy={activeCancellation.busy} error={activeCancellation.error || (order.can_cancel !== true ? 'Trạng thái đơn hàng đã thay đổi. Đơn hàng hiện không đủ điều kiện hủy.' : '')} onValidityChange={setCancelReasonValid} onClose={() => { if (!cancellationRequest.current) setCancellation(null); }} onConfirm={confirmCancellation} onReload={() => { setCancellation(null); setRetry(value => value + 1); }} />}
+      {activeCancellation && <CancelOrderDialog order={order} busy={activeCancellation.busy} error={activeCancellation.error || (order.can_cancel !== true ? 'Trạng thái đơn hàng đã thay đổi. Đơn hàng hiện không đủ điều kiện hủy.' : '')} onValidityChange={setCancelReasonValid} onClose={() => { if (!cancellationRequest.current) setCancellation(null); }} onConfirm={confirmCancellation} onReload={() => { skipPaymentRefetchForOrderRef.current = null; setCancellation(null); setRetry(value => value + 1); }} />}
     </> : null}
   </div>;
 }

@@ -54,7 +54,7 @@ export function getSePayQr(order, payment) {
   return qr;
 }
 
-export function SePayPaymentDialog({ qr, onRefresh, onClose }) {
+export function SePayPaymentDialog({ qr, onRefresh, onClose, autoChecking = false }) {
   const dialog = useRef(null);
   useEffect(() => {
     const node = dialog.current;
@@ -67,7 +67,7 @@ export function SePayPaymentDialog({ qr, onRefresh, onClose }) {
     <div className="sepay-payment-dialog-header"><h2 id="sepay-dialog-title">Thanh toán đơn hàng #{qr.orderId}</h2>
       <button type="button" className="sepay-payment-dialog-close" aria-label="Đóng QR và xem chi tiết đơn hàng" onClick={onClose}>×</button>
     </div>
-    <SePayQr qr={qr} onRefresh={onRefresh} />
+    <SePayQr qr={qr} onRefresh={onRefresh} autoChecking={autoChecking} />
   </dialog>;
 }
 
@@ -97,7 +97,7 @@ export function SePayStatus({ status, onRefresh }) {
   </div>;
 }
 
-export default function SePayQr({ qr, onRefresh }) {
+export default function SePayQr({ qr, onRefresh, autoChecking = false }) {
   const testMode = qr.mode === 'test';
   const deadline = Date.parse(qr.expiresAt);
   const [expired, setExpired] = useState(() => deadline <= Date.now());
@@ -141,6 +141,7 @@ export default function SePayQr({ qr, onRefresh }) {
       <div><dt>Hạn thanh toán</dt><dd><time dateTime={qr.expiresAt}>{formatOrderDate(qr.expiresAt, true)}</time></dd></div>
     </dl>
     <p className="sepay-test-qr-note">Mở lại mã QR luôn dùng đúng đơn hàng đã lưu. Việc hiển thị QR không tự xác nhận thanh toán.</p>
+    {autoChecking && !expired && <p className="sepay-test-qr-auto" role="status">Đang tự động kiểm tra trạng thái thanh toán...</p>}
     <button className="button button-outline sepay-test-refresh-btn" type="button" onClick={onRefresh}>Cập nhật trạng thái thanh toán</button>
   </div>;
 }
