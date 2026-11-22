@@ -113,3 +113,5 @@
 }
 
 .my-order-payment-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; }
+.my-order-item-pets { margin-top: 4px; color: var(--color-primary-hover); font-size: 12px; }
+.my-order-item-pets strong { color: var(--color-text); font-weight: 600; }

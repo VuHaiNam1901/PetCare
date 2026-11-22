@@ -7,6 +7,7 @@ const { MODEL } = require('../config/gemini');
 const { createGeminiAdapter, geminiError } = require('./gemini-adapter');
 const { createProductRepository, normalizeText } = require('./products');
 const { createProductTools } = require('./tools');
+const { createPetTools } = require('./pet-tools');
 const { validatePlan, redactPersonal, rejectionCode } = require('./grounding');
 const { measure, measureSync } = require('./metrics');
 const memoryCore = require('./memory');
@@ -56,17 +57,19 @@ function validateCapabilities(plan, websiteGuides) {
 }
 
 function createOrchestrator({ generate = createGeminiAdapter(), repository = createProductRepository(),
-    tools = createProductTools({ repository }), limits: overrides = {}, onUsage = () => {} } = {}) {
+    tools = createProductTools({ repository }), petTools = createPetTools(), limits: overrides = {}, onUsage = () => {} } = {}) {
     check(Object.keys(overrides).every(key => Object.hasOwn(DEFAULT_LIMITS, key)), 'INVALID_ORCHESTRATOR_CONFIG');
     const limits = { ...DEFAULT_LIMITS, ...overrides };
     for (const [key, value] of Object.entries(limits)) check(Number.isSafeInteger(value) && value > 0 && value <= DEFAULT_LIMITS[key], 'INVALID_ORCHESTRATOR_CONFIG');
-    check(typeof generate === 'function' && tools && typeof tools.execute === 'function', 'INVALID_ORCHESTRATOR_CONFIG');
+    check(typeof generate === 'function' && tools && typeof tools.execute === 'function' && petTools && typeof petTools.execute === 'function', 'INVALID_ORCHESTRATOR_CONFIG');
 
     return { async reply(input) {
         check(input && typeof input === 'object' && !Array.isArray(input) &&
-            Object.keys(input).every(key => ['message', 'history', 'memory', 'turn_id', 'signal', 'page_context'].includes(key)), 'INVALID_SEARCH');
+            Object.keys(input).every(key => ['message', 'history', 'memory', 'turn_id', 'signal', 'page_context', 'user_id'].includes(key)), 'INVALID_SEARCH');
         check(input.page_context == null || isResolvedPageContext(input.page_context), 'INVALID_SEARCH');
+        check(input.user_id == null || (Number.isInteger(input.user_id) && input.user_id > 0 && input.user_id <= 2147483647), 'INVALID_SEARCH');
         const pageContext = input.page_context ?? null;
+        const userId = input.user_id ?? null;
         check(typeof input.message === 'string' && input.message.trim() && [...input.message].length <= 2000 &&
             !/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/u.test(input.message), 'INVALID_SEARCH');
         check(input.signal === undefined || (input.signal && typeof input.signal.aborted === 'boolean' &&
@@ -80,6 +83,8 @@ function createOrchestrator({ generate = createGeminiAdapter(), repository = cre
         const controller = new AbortController();
         const usage = { model_calls: 0, tool_calls: 0, prompt_tokens: 0, output_tokens: 0,
             thinking_tokens: 0, total_tokens: 0, reserved_tokens: 0, usage_reported: true };
+        let calibratedPromptTokens = 0;
+        let calibratedWireChars = 0;
         const started = Date.now();
         let rejectDeadline;
         const expired = new Promise((_, reject) => { rejectDeadline = reject; });
@@ -92,6 +97,7 @@ function createOrchestrator({ generate = createGeminiAdapter(), repository = cre
             const evidence = new Map();
             const websiteGuides = new Map();
             const comparedIds = new Set();
+            const observedPets = new Map();
             let catalogObserved = false;
             const seenCalls = new Set();
             const contents = [];
@@ -112,6 +118,7 @@ function createOrchestrator({ generate = createGeminiAdapter(), repository = cre
                     ...(preparing ? { active_context: context.active_context, compaction,
                         recent_history: context.recent_history.filter(item => item.sequence > compaction.through_sequence) } : context), limits,
                     capabilities: { contact_human: false, execute_transactions: false, read_account_orders: false,
+                        read_user_pets: Boolean(userId),
                         website_usage_guides: true, verified_store_policies: false, current_page_awareness: Boolean(pageContext) },
                     ...(pageContext ? { current_page: pageContext } : {}),
                     historical_product_facts_are_current: false,
@@ -122,7 +129,13 @@ function createOrchestrator({ generate = createGeminiAdapter(), repository = cre
             for (let round = 0; round < limits.modelCalls; round++) {
                 if (controller.signal.aborted) throw failure('GEMINI_TIMEOUT', 504);
                 const lastRound = round === limits.modelCalls - 1;
-                const allowedNames = preparing ? ['compact_memory'] : lastRound ? ['respond'] : FUNCTION_DECLARATIONS.filter(item => item.name !== 'compact_memory').map(item => item.name);
+                const allowedNames = preparing
+                    ? ['compact_memory']
+                    : lastRound
+                        ? ['respond']
+                        : FUNCTION_DECLARATIONS
+                            .filter(item => item.name !== 'compact_memory' && (userId || !['get_my_pets', 'get_pet_purchase_history'].includes(item.name)))
+                            .map(item => item.name);
                 const finalInstruction = lastRound && !preparing
                     ? websiteGuides.size ? '\nĐây là lượt kết thúc. Với website_help, hướng dẫn tối đa bốn bước ngắn từ guides đã đọc, giữ điều kiện và giới hạn. Không suy đoán trạng thái tài khoản/đơn, không tạo nút hoặc đường dẫn. Với sản phẩm, chỉ chọn tối đa ba thẻ đã xác minh, không viết tên/giá/tồn hoặc placeholder trong lời văn.'
                         : '\nĐây là lượt kết thúc: respond chỉ 1–2 câu ngắn, tối đa ba thẻ đã xác minh. Không liệt kê tên, biến thể, khối lượng, giá, ngân sách bằng số, số tồn hoặc mã placeholder. Không tham chiếu lựa chọn thứ tư trở đi. Chỉ kết luận hữu ích dựa trên công cụ và hỏi làm rõ nếu thiếu đối tượng; không bổ sung dữ kiện mới.' : '';
@@ -130,12 +143,17 @@ function createOrchestrator({ generate = createGeminiAdapter(), repository = cre
                     toolConfig: { functionCallingConfig: { mode: 'ANY', allowedFunctionNames: allowedNames } },
                     maxOutputTokens: Math.min(limits.outputTokens, limits.totalTokens - usage.total_tokens - usage.reserved_tokens),
                     abortSignal: controller.signal, httpOptions: { timeout: Math.max(1, limits.timeoutMs - (Date.now() - started)), retryOptions: { attempts: 1 } } };
-                const wireBytes = Buffer.byteLength(JSON.stringify({ contents, config: { ...config, abortSignal: undefined } }), 'utf8');
+                const wirePayload = JSON.stringify({ contents, config: { ...config, abortSignal: undefined } });
+                const wireBytes = Buffer.byteLength(wirePayload, 'utf8');
+                const wireChars = wirePayload.length;
                 check(wireBytes <= limits.inputBytes, 'CONTEXT_LIMIT');
-                // A conservative byte reservation also bounds calls whose mocks
-                // or provider omit token usage. No request is an unlimited retry.
-                check(config.maxOutputTokens > 0 && usage.total_tokens + usage.reserved_tokens + wireBytes + config.maxOutputTokens <= limits.totalTokens, 'TOKEN_LIMIT');
-                const reservation = wireBytes + config.maxOutputTokens;
+                // Estimate input token reservation conservatively without conflating UTF-8 byte length with token counts:
+                // anchor from Gemini's actual promptTokenCount on earlier rounds plus bounded margin for new content.
+                const estimatedInputTokens = calibratedPromptTokens > 0
+                    ? Math.ceil(calibratedPromptTokens * 1.05 + Math.ceil(Math.max(0, wireChars - calibratedWireChars) / 2))
+                    : Math.ceil(wireChars / 2);
+                const reservation = estimatedInputTokens + config.maxOutputTokens;
+                check(config.maxOutputTokens > 0 && usage.total_tokens + usage.reserved_tokens + reservation <= limits.totalTokens, 'TOKEN_LIMIT');
                 const previousUsageReported = usage.usage_reported;
                 usage.reserved_tokens += reservation;
                 usage.usage_reported = false;
@@ -150,6 +168,10 @@ function createOrchestrator({ generate = createGeminiAdapter(), repository = cre
                 if (reported) {
                     usage.reserved_tokens -= reservation;
                     usage.usage_reported = previousUsageReported;
+                    if (Number.isSafeInteger(metadata.promptTokenCount)) {
+                        calibratedPromptTokens = metadata.promptTokenCount;
+                        calibratedWireChars = wireChars;
+                    }
                     usage.prompt_tokens += metadata.promptTokenCount || 0;
                     usage.output_tokens += metadata.candidatesTokenCount || 0;
                     usage.thinking_tokens += metadata.thoughtsTokenCount || 0;
@@ -197,7 +219,8 @@ function createOrchestrator({ generate = createGeminiAdapter(), repository = cre
                                 ? args.advice.replace(/\\n/g, '\n').replace(/(^|\n)[ \t]*\d{1,2}[.)][ \t]+/g, '$1- ') : args.advice;
                             plan = measureSync('grounding_ms', () => validatePlan({ text: JSON.stringify({ advice, product_ids: args.product_ids, follow_up: args.follow_up, warnings: args.warnings }), candidates: [{ finishReason: 'STOP' }] },
                                 { mode: args.mode, intent: args.intent, products: [...evidence.values()], search,
-                                    website_guides: [...websiteGuides.values()], page_context: pageContext }));
+                                    website_guides: [...websiteGuides.values()], page_context: pageContext,
+                                    pet_profiles: [...observedPets.values()] }));
                         }
                         catch (error) {
                             if (lastRound) throw failure('GROUNDING_REJECTED');
@@ -260,12 +283,75 @@ function createOrchestrator({ generate = createGeminiAdapter(), repository = cre
                             resetContext = true;
                         } catch { throw failure('INVALID_MEMORY_UPDATE'); }
                         result = { status: 'ok', summary: memory.summary, active_context: memoryCore.getActiveContext(memory), current_turn_id: turnId, preparing };
+                    } else if (call.name === 'get_my_pets') {
+                        check(Boolean(userId) && !preparing);
+                        try { result = await petTools.execute(call.args, { userId }); }
+                        catch {
+                            result = {
+                                authenticated: true,
+                                ready: false,
+                                total: 0,
+                                default_pet_id: null,
+                                ambiguous_name: false,
+                                needs_selection: false,
+                                matched_pets: [],
+                                pets: [],
+                                purchase_history_available: true,
+                                note: 'Không thể đọc hồ sơ thú cưng lúc này.',
+                            };
+                        }
+                        check(Buffer.byteLength(JSON.stringify(result), 'utf8') <= limits.toolResultBytes, 'TOOL_RESULT_LIMIT');
+                        for (const pet of [...(result.pets || []), ...(result.matched_pets || [])]) {
+                            if (pet && Number.isInteger(pet.pet_id)) observedPets.set(pet.pet_id, pet);
+                        }
+                    } else if (call.name === 'get_pet_purchase_history') {
+                        check(Boolean(userId) && !preparing);
+                        let rawHistory;
+                        try { rawHistory = await petTools.executePurchaseHistory(call.args, { userId, productRepository: repository }); }
+                        catch {
+                            rawHistory = {
+                                authenticated: true,
+                                ready: false,
+                                ambiguous_name: false,
+                                needs_selection: false,
+                                matched_pets: [],
+                                histories: [],
+                                catalog_products: [],
+                                confirmed_consumption: false,
+                                note: 'Không thể đọc lịch sử mua hàng của thú cưng lúc này.',
+                            };
+                        }
+                        for (const pet of rawHistory.matched_pets || []) {
+                            if (pet && Number.isInteger(pet.pet_id)) observedPets.set(pet.pet_id, pet);
+                        }
+                        for (const entry of rawHistory.histories || []) {
+                            if (entry?.pet && Number.isInteger(entry.pet.pet_id)) observedPets.set(entry.pet.pet_id, entry.pet);
+                        }
+                        const verifiedCatalog = Array.isArray(rawHistory.catalog_products) ? rawHistory.catalog_products : [];
+                        for (const prod of verifiedCatalog) {
+                            if (prod && Number.isInteger(prod.product_id)) evidence.set(prod.product_id, prod);
+                        }
+                        if (verifiedCatalog.length > 0) catalogObserved = true;
+                        result = {
+                            ...rawHistory,
+                            catalog_products: verifiedCatalog.map(prod => ({
+                                product_id: prod.product_id,
+                                name: prod.name,
+                                category_name: prod.category_name,
+                                price: prod.price,
+                                stock_quantity: prod.stock_quantity,
+                                available: prod.status === 'Đang bán' && Number(prod.stock_quantity) > 0,
+                                status: prod.status,
+                                pet_types: prod.pet_types,
+                            })),
+                        };
+                        check(Buffer.byteLength(JSON.stringify(result), 'utf8') <= limits.toolResultBytes, 'TOOL_RESULT_LIMIT');
                     } else {
                         check(PRODUCT_TOOLS.has(call.name) && !preparing);
                         // Catalog state is mutable even inside one turn. A
                         // cached earlier read must not resurrect an ID revoked
                         // by a later lookup; repeated calls spend the tool budget.
-                        try { result = await tools.execute(call.name, call.args, { memory, signal: controller.signal }); }
+                        try { result = await tools.execute(call.name, call.args, { memory, signal: controller.signal, observedPets: [...observedPets.values()] }); }
                         catch (error) {
                             if (error?.code !== 'INVALID_TOOL') throw failure('CATALOG_UNAVAILABLE');
                             // Give Gemini one bounded opportunity per remaining

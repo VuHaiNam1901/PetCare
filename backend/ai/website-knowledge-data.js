@@ -175,6 +175,15 @@ module.exports = [
         sources: ['frontend/src/components/Footer.jsx', 'frontend/src/components/FloatingContact.jsx', 'frontend/src/App.jsx'],
     },
     {
+        id: 'pet_profile', name: 'Thú cưng của tôi', purpose: 'Tạo, xem chi tiết, chỉnh sửa, đặt mặc định, xóa hồ sơ thú cưng theo 6 loài và theo dõi lịch sử sản phẩm đã mua cho từng bé.', availability: 'available', routes: ['/my-pets', '/my-pets/:petId', '/checkout'],
+        steps: ['Đăng nhập tài khoản khách hàng rồi mở mục "Thú cưng của tôi" trong menu Tài khoản hoặc thanh bên trang hồ sơ để thêm hoặc quản lý thú cưng theo 6 loài.', 'Khi đặt hàng tại trang Đặt hàng, có thể chọn không bắt buộc một hoặc nhiều thú cưng cho từng sản phẩm để lưu liên kết theo từng bé.', 'Mở chi tiết thú cưng tại "Thú cưng của tôi" để xem mục "Lịch sử sản phẩm đã mua" hoặc xem lại tên thú cưng đã gắn trong chi tiết đơn hàng.'],
+        conditions: ['Cần đăng nhập tài khoản khách hàng (role user).', 'Việc chọn thú cưng khi thanh toán hoàn toàn không bắt buộc; khách không có hồ sơ vẫn mua hàng bình thường.'],
+        unavailable: ['Chưa hỗ trợ tự tải ảnh riêng cho thú cưng (hiện dùng ảnh đại diện mẫu theo loài).'],
+        notes: ['Chatbot có thể đọc hồ sơ và lịch sử mua hàng đã liên kết của chính tài khoản đang đăng nhập để tư vấn mua lại hoặc gợi ý sản phẩm thay thế; đơn hoàn tất chỉ chứng minh đã mua, không tự khẳng định thú cưng đã sử dụng.'],
+        labels: ['Thú cưng của tôi', 'Thêm thú cưng', 'Xem chi tiết', 'Chỉnh sửa', 'Đặt mặc định', 'Xóa', 'Lịch sử sản phẩm đã mua'],
+        sources: ['frontend/src/pages/MyPetsPage.jsx', 'frontend/src/pages/CheckoutPage.jsx', 'backend/routes/pets.js', 'backend/routes/orders.js'],
+    },
+    {
         id: 'feature_limits', name: 'Chức năng chưa hoàn thiện hoặc chưa xác minh', purpose: 'Trả lời trung thực khi không có hướng dẫn chắc chắn.', availability: 'limited', routes: ['/profile', '/checkout', '/#lien-he'],
         steps: ['Nêu rõ chưa có thông tin chắc chắn nếu chức năng không nằm trong hướng dẫn đã xác minh; có thể đề nghị liên hệ shop qua phần Liên hệ.'],
         conditions: ['Chỉ hướng dẫn thao tác và tính năng có trong nguồn; không suy luận toàn bộ website từ một trang.'],

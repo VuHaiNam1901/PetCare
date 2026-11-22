@@ -41,7 +41,7 @@ router.post('/', orderCreateRateLimit, handle(async (req, res) => {
     const allowed = ['source', 'items', 'recipient_name', 'shipping_address', 'phone', 'payment_method', 'note', 'voucher_code'];
     if (!body || typeof body !== 'object' || Array.isArray(body) || Object.keys(body).some(field => !allowed.includes(field))) bad('Unsupported order fields');
     if (!['cart', 'buy-now'].includes(body.source)) bad('source must be cart or buy-now');
-    if (!Array.isArray(body.items) || !body.items.length || body.items.length > 100 || body.items.some(item => !item || typeof item !== 'object' || Array.isArray(item) || Object.keys(item).some(field => !['product_id', 'quantity'].includes(field)) || !id(item.product_id) || !id(item.quantity)) || new Set(body.items.map(item => item.product_id)).size !== body.items.length) bad('Select 1-100 distinct products with positive integer quantities');
+    if (!Array.isArray(body.items) || !body.items.length || body.items.length > 100 || body.items.some(item => !item || typeof item !== 'object' || Array.isArray(item) || Object.keys(item).some(field => !['product_id', 'quantity', 'pet_ids'].includes(field)) || !id(item.product_id) || !id(item.quantity) || (item.pet_ids !== undefined && (!Array.isArray(item.pet_ids) || item.pet_ids.length > 10 || item.pet_ids.some(pid => !id(pid))))) || new Set(body.items.map(item => item.product_id)).size !== body.items.length) bad('Select 1-100 distinct products with positive integer quantities and up to 10 valid pet IDs per product');
     if (body.source === 'buy-now' && body.items.length !== 1) bad('Buy now requires exactly one product');
     if (!shippingText(body.recipient_name, 1, 100)) bad('Invalid recipient name');
     if (!shippingText(body.shipping_address, 5, 255, true)) bad('Invalid shipping address');
@@ -50,7 +50,10 @@ router.post('/', orderCreateRateLimit, handle(async (req, res) => {
     if (body.note != null && !shippingText(body.note, 0, 200, true)) bad('Invalid note; maximum 200 characters');
     const input = {
         source: body.source,
-        items: body.items.map(({ product_id, quantity }) => ({ product_id, quantity })).sort((a, b) => a.product_id - b.product_id),
+        items: body.items.map(({ product_id, quantity, pet_ids }) => {
+            const normalizedPets = Array.isArray(pet_ids) ? [...new Set(pet_ids)].sort((a, b) => a - b) : [];
+            return normalizedPets.length ? { product_id, quantity, pet_ids: normalizedPets } : { product_id, quantity };
+        }).sort((a, b) => a.product_id - b.product_id),
         recipient_name: body.recipient_name.trim(), shipping_address: body.shipping_address.trim(),
         phone: body.phone.trim(), payment_method: body.payment_method, note: body.note?.trim() || null
     };

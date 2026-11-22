@@ -128,20 +128,38 @@ const genericAfterNaming = new Set(('cac nhung mot vai lua chon loai thuc an do 
 // Generic size/material terms are not brand names, including uppercase INOX.
 for (const word of ['size', 'inox']) { commonWords.add(word); genericAfterNaming.add(word); }
 
+function maskObservedPetTerms(text, petProfiles = []) {
+    const terms = [];
+    for (const pet of petProfiles) {
+        if (pet?.name) terms.push(String(pet.name).trim());
+        if (pet?.breed) terms.push(String(pet.breed).trim());
+    }
+    const unique = [...new Set(terms.filter(term => term.length >= 2))]
+        .sort((a, b) => b.length - a.length);
+    if (!unique.length) return text;
+    let masked = text;
+    for (const term of unique) {
+        const escaped = term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        masked = masked.replace(new RegExp(`(?<![\\p{L}\\p{N}])${escaped}(?![\\p{L}\\p{N}])`, 'giu'), 'thú cưng');
+    }
+    return masked;
+}
+
 function assertNoInventedName(text, context) {
-    const source = fold(text);
+    const petSafeText = maskObservedPetTerms(text, context.pet_profiles || []);
+    const source = fold(petSafeText);
     for (const match of source.matchAll(/(?=(\b(?:san pham|nhan hieu|thuong hieu|brand|mua|chon|dung|de xuat|goi y|thuc an|pate|sua tam|cat ve sinh|minh co|shop co|cua hang co|co ban)\s+(?:moi\s+)?([a-z][a-z0-9_-]{2,})))/g)) {
         const offset = match.index + match[1].lastIndexOf(match[2]);
-        const originalWord = text.slice(offset, offset + match[2].length);
+        const originalWord = petSafeText.slice(offset, offset + match[2].length);
         if (!genericAfterNaming.has(match[2]) && !commonWords.has(match[2]) && !/[^\x00-\x7F]/.test(originalWord)) reject('Generated product name');
     }
-    const prose = text.replace(/PetCare(?:Shop)?/g, 'trợ lý');
+    const prose = petSafeText.replace(/PetCare(?:Shop)?/g, 'trợ lý');
     for (const match of prose.matchAll(/\b[A-Z][a-z]{2,}\s+[A-Z][A-Za-z0-9+_-]{2,}\b|\b[A-Z][a-z]+(?:[A-Z][a-z]*)+\b|\b[A-Z]{3,}[A-Z0-9+_-]*\b/g)) {
         if (normalizeText(match[0]).split(' ').some(word => !commonWords.has(word))) reject('Unverified proper name in prose');
     }
     // Also cover lowercase names used as a sentence subject without "buy".
     const subject = /(?:^|[.!?]\s*)([\p{L}][\p{L}\d_-]{2,})(?:\s+([\p{L}][\p{L}\d_-]{2,}))?\s+(?:rat tot|chat luong cao|tot cho|giup dieu tri)\b/giu;
-    for (const match of fold(text).matchAll(subject)) if (!commonWords.has(match[1])) reject('Generated product name');
+    for (const match of fold(petSafeText).matchAll(subject)) if (!commonWords.has(match[1])) reject('Generated product name');
     for (const product of context.products || []) {
         if (String(product.name).length >= 6 && namePattern(String(product.name)).test(text)) reject('Product name belongs in a card');
     }

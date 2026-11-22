@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { AlertCircle, ArrowLeft, CheckCircle2, ChevronRight, CreditCard, Info, PackageCheck, RefreshCw, ShieldCheck, ShoppingBag, Truck } from 'lucide-react';
+import { AlertCircle, ArrowLeft, CheckCircle2, ChevronRight, CreditCard, Info, PackageCheck, PawPrint, RefreshCw, ShieldCheck, ShoppingBag, Truck } from 'lucide-react';
 import { useCommerce } from '../context/CommerceContext.jsx';
 import { ProductImage } from '../components/ProductCard.jsx';
 import { commerceApi } from '../services/commerce.js';
@@ -64,7 +64,7 @@ const receiptPreview = order => ({ rows: order.items.map(item => ({ ...item, pri
 const voucherKey = (draft, method, prices, userId) => JSON.stringify([userId, draft?.intent_id, draft?.items, method, prices]);
 const voucherRejections = ['INVALID_VOUCHER', 'VOUCHER_NOT_FOUND', 'VOUCHER_NOT_ASSIGNED', 'VOUCHER_INACTIVE', 'VOUCHER_NOT_STARTED', 'VOUCHER_EXPIRED', 'VOUCHER_MINIMUM_NOT_MET', 'VOUCHER_QUOTA_EXCEEDED', 'VOUCHER_USER_LIMIT_EXCEEDED', 'VOUCHER_ONLINE_ZERO_TOTAL', 'VOUCHERS_DISABLED', 'VOUCHER_SCHEMA_NOT_READY', 'VOUCHER_DISTRIBUTION_NOT_READY', 'ORDER_WORKFLOW_DISABLED'];
 
-function CheckoutItem({ item }) {
+function CheckoutItem({ item, pets = [], selectedPetIds = [], onTogglePet, locked = false, ordered = false }) {
   const source = resolveImageUrl(item.image_url);
   return <article className={`checkout-item${item.available ? '' : ' is-unavailable'}`} data-product-id={item.product_id}>
     <a className="checkout-item-image" href={`/products/${item.product_id}`} aria-label={`Xem chi tiết ${item.name}`}><ProductImage key={source} source={source} name={item.name} width={64} height={64} /></a>
@@ -73,12 +73,42 @@ function CheckoutItem({ item }) {
       <p className="checkout-item-unit">Đơn giá: {amount(item.price)}</p>
       <div className="checkout-item-bottom"><span className="checkout-item-quantity">Số lượng: {item.quantity}</span><span className="checkout-item-total">{amount(item.line_total)}</span></div>
       {!item.available && <p className="checkout-item-error" role="alert">{item.availability_message}</p>}
+      {ordered ? (
+        Array.isArray(item.pets) && item.pets.length > 0 && (
+          <p className="checkout-item-pets-summary">Dành cho: <strong>{item.pets.map(p => p.pet_name_snapshot).join(', ')}</strong></p>
+        )
+      ) : pets.length > 0 && (
+        <div className="checkout-item-pets">
+          <p className="checkout-item-pets-label">
+            <PawPrint size={12} aria-hidden="true" />
+            <span>Sản phẩm này dành cho thú cưng nào? <small>(không bắt buộc)</small></span>
+          </p>
+          <div className="checkout-item-pet-chips" role="group" aria-label={`Chọn thú cưng cho ${item.name}`}>
+            {pets.map(pet => {
+              const selected = selectedPetIds.includes(pet.pet_id);
+              const atLimit = !selected && selectedPetIds.length >= 10;
+              return (
+                <button
+                  key={pet.pet_id}
+                  type="button"
+                  aria-pressed={selected}
+                  disabled={locked || atLimit}
+                  className={`checkout-pet-chip${selected ? ' is-selected' : ''}`}
+                  onClick={() => onTogglePet(item.product_id, pet.pet_id)}
+                >
+                  {pet.name} · {pet.species_name}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
     </div>
   </article>;
 }
 
 export default function CheckoutPage() {
-  const { user, authLoading, cartSource, resumeCheckout, submitOrder, orderCommitted, quoteCheckoutVoucher } = useCommerce();
+  const { user, authLoading, cartSource, resumeCheckout, submitOrder, orderCommitted, quoteCheckoutVoucher, getPets } = useCommerce();
   const voucherReadiness = useVoucherReadiness();
   const paymentOptions = usePaymentOptions();
   const [draft, setDraft] = useState(null);
@@ -86,6 +116,11 @@ export default function CheckoutPage() {
   const [redirecting, setRedirecting] = useState(false);
   const [shipping, setShipping] = useState(emptyShipping);
   const [paymentMethod, setPaymentMethod] = useState('COD');
+  const [itemPets, setItemPets] = useState({});
+  const [customerPets, setCustomerPets] = useState([]);
+  const [petsLoaded, setPetsLoaded] = useState(false);
+  const petsFetcher = useRef(getPets);
+  petsFetcher.current = getPets;
   const [errors, setErrors] = useState({});
   const [preview, setPreview] = useState({ rows: [], prices: {}, subtotal: null });
   const [loading, setLoading] = useState(true);
@@ -132,7 +167,7 @@ export default function CheckoutPage() {
       return () => { alive = false; };
     }
     const saved = user.role === 'user' ? readCheckoutDraft(user.user_id) : null;
-    setDraft(saved); setShipping(saved?.shipping || emptyShipping); setPaymentMethod(saved?.payment_method || 'COD');
+    setDraft(saved); setShipping(saved?.shipping || emptyShipping); setPaymentMethod(saved?.payment_method || 'COD'); setItemPets(saved?.item_pets || {});
     voucherSequence.current++; voucherController.current?.abort();
     setVoucherInput(saved?.voucher_code || ''); setVoucherQuote(null); setVoucherError(''); setVoucherNotice(''); setVoucherBusy(false);
     setOrder(saved?.order || null);
@@ -140,6 +175,31 @@ export default function CheckoutPage() {
     setInitialized(true); setRedirecting(false);
     if (!saved) setLoading(false);
   }, [authLoading, user?.user_id, user?.role, cartSource]);
+
+  useEffect(() => {
+    if (authLoading || user?.role !== 'user') {
+      setCustomerPets([]);
+      setPetsLoaded(false);
+      return;
+    }
+    const controller = new AbortController();
+    setPetsLoaded(false);
+    Promise.resolve()
+      .then(() => petsFetcher.current({ signal: controller.signal }))
+      .then(data => {
+        if (!controller.signal.aborted) {
+          setCustomerPets(Array.isArray(data?.pets) ? data.pets : []);
+          setPetsLoaded(true);
+        }
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) {
+          setCustomerPets([]);
+          setPetsLoaded(true);
+        }
+      });
+    return () => controller.abort();
+  }, [authLoading, user?.user_id, user?.role]);
 
   useEffect(() => {
     if (authLoading || user?.role !== 'user' || !order || order.user_id !== user.user_id) return;
@@ -240,6 +300,22 @@ export default function CheckoutPage() {
     setErrors(current => ({ ...current, [name]: validateShipping(shipping)[name] }));
   }
 
+  function toggleItemPet(productId, petId) {
+    if (submitting.current || draft?.submission || order) return;
+    const key = String(productId);
+    const currentList = Array.isArray(itemPets[key]) ? itemPets[key] : [];
+    const exists = currentList.includes(petId);
+    const nextList = exists
+      ? currentList.filter(id => id !== petId)
+      : [...currentList, petId].sort((a, b) => a - b).slice(0, 10);
+    const next = { ...itemPets };
+    if (nextList.length) next[key] = nextList;
+    else delete next[key];
+    setItemPets(next);
+    setSubmitError('');
+    persist({ item_pets: next });
+  }
+
   async function confirm(event) {
     event.preventDefault();
     if (submitting.current || order) return;
@@ -297,7 +373,7 @@ export default function CheckoutPage() {
     } catch (error) {
       if (sequence !== requestSequence.current) return;
       // These responses prove that this request did not commit. Ambiguous failures retain the key.
-      const rejected = ['INVALID_ORDER', 'CART_CHANGED', 'PRODUCT_UNAVAILABLE', 'OUT_OF_STOCK', 'ORDER_TOTAL_TOO_LARGE', 'ONLINE_PAYMENT_UNAVAILABLE', 'ONLINE_PAYMENT_AMOUNT_UNSUPPORTED', ...voucherRejections].includes(error.code);
+      const rejected = ['INVALID_ORDER', 'INVALID_ORDER_PET', 'CART_CHANGED', 'PRODUCT_UNAVAILABLE', 'OUT_OF_STOCK', 'ORDER_TOTAL_TOO_LARGE', 'ONLINE_PAYMENT_UNAVAILABLE', 'ONLINE_PAYMENT_AMOUNT_UNSUPPORTED', ...voucherRejections].includes(error.code);
       if (attempt && rejected) {
         try { setDraft(clearCheckoutSubmission(user.user_id, attempt.key)); }
         catch (failure) { setStorageError(failure.message); }
@@ -384,7 +460,28 @@ export default function CheckoutPage() {
               <aside className="checkout-card checkout-summary" aria-labelledby="checkout-summary-title">
                 <div className="checkout-summary-heading"><h2 id="checkout-summary-title">Đơn hàng của bạn</h2><span>{draft.items.length} sản phẩm</span></div>
                 <div className="checkout-source"><ShoppingBag size={12} aria-hidden="true" />{draft.type === 'buy-now' ? 'Sản phẩm Mua ngay' : 'Sản phẩm đã chọn từ giỏ hàng'}</div>
-                {loading && !preview.rows.length ? <p className="checkout-preview-status" role="status">Đang kiểm tra sản phẩm...</p> : <div className="checkout-items">{preview.rows.map(item => <CheckoutItem key={item.product_id} item={item} />)}</div>}
+                {loading && !preview.rows.length ? <p className="checkout-preview-status" role="status">Đang kiểm tra sản phẩm...</p> : (
+                  <>
+                    <div className="checkout-items">
+                      {preview.rows.map(item => (
+                        <CheckoutItem
+                          key={item.product_id}
+                          item={item}
+                          pets={customerPets}
+                          selectedPetIds={itemPets[String(item.product_id)] || []}
+                          onTogglePet={toggleItemPet}
+                          locked={locked}
+                          ordered={Boolean(order)}
+                        />
+                      ))}
+                    </div>
+                    {!order && petsLoaded && customerPets.length === 0 && (
+                      <p className="checkout-pets-hint">
+                        Chưa có hồ sơ thú cưng? Bạn vẫn đặt hàng bình thường hoặc <a href="/my-pets">thêm tại Thú cưng của tôi</a> để lưu lịch sử mua theo bé.
+                      </p>
+                    )}
+                  </>
+                )}
                 {!order && <CheckoutVoucher ready={voucherReadiness.ready} available={voucherAvailable} readinessLoading={voucherReadiness.loading} code={voucherInput} appliedCode={selectedCode || draft.submission?.payload.voucher_code || ''} quote={currentQuote} error={voucherError} notice={voucherNotice} busy={voucherBusy} locked={locked} disabled={loading || Boolean(previewError) || unavailable} subtotal={preview.subtotal} selectionKey={quoteKey} onChange={changeVoucher} onApply={applyVoucher} onSelect={async code => { setVoucherInput(code); await checkVoucher(code, true); }} onRemove={removeVoucher} />}
                 <dl className="checkout-totals"><div><dt>Tạm tính</dt><dd className="checkout-subtotal">{summaryAmount(subtotalAmount)}</dd></div>{hasVoucher && <div className="checkout-voucher-discount"><dt>Giảm giá Voucher{order?.voucher_code_snapshot ? <small>{order.voucher_code_snapshot}</small> : null}</dt><dd>{discountAmount == null ? 'Đang chờ xác nhận' : `−${summaryAmount(discountAmount)}`}</dd></div>}<div className="checkout-shipping"><dt>Phí vận chuyển</dt><dd>Chưa xác định</dd></div><div className="checkout-grand-total"><dt>Tiền hàng chưa gồm vận chuyển</dt><dd className="checkout-total">{summaryAmount(totalAmount)}</dd></div></dl>
                 <p className="checkout-shipping-note">Phí vận chuyển sẽ được cửa hàng thông báo khi xác nhận đơn.</p>

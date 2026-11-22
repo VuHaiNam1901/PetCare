@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { ChevronDown, ClipboardList, Compass, ContactRound, FolderTree, Heart, LogOut, Mail, Menu, Package, Phone, Search, ShoppingCart, TicketPercent, Truck, UserRound, Users, X } from 'lucide-react';
+import { ChevronDown, ClipboardList, Compass, ContactRound, FolderTree, Heart, LogOut, Mail, Menu, Package, PawPrint, Phone, Search, ShoppingCart, TicketPercent, Truck, UserRound, Users, X } from 'lucide-react';
 import Logo from './Logo.jsx';
 import { useCommerce } from '../context/CommerceContext.jsx';
 import { useWishlist } from '../context/WishlistContext.jsx';
@@ -40,11 +40,11 @@ export default function Header({ query, onQueryChange, categories, onCategoryCha
   const productSubpage = isProductDetailPage || isProductReviewsPage;
   const inProducts = isProductsPage || productSubpage;
   const currentPath = window.location.pathname.replace(/\/+$/, '');
-  const otherPage = ['/cart', '/checkout', '/login', '/register', '/my-orders', '/my-vouchers', '/wishlist', '/profile', '/admin/orders', '/admin/products', '/admin/categories', '/admin/users', '/admin/vouchers'].includes(currentPath) || currentPath.startsWith('/my-orders/') || currentPath.startsWith('/admin/orders/');
+  const otherPage = ['/cart', '/checkout', '/login', '/register', '/my-orders', '/my-pets', '/my-vouchers', '/wishlist', '/profile', '/admin/orders', '/admin/products', '/admin/categories', '/admin/users', '/admin/vouchers'].includes(currentPath) || currentPath.startsWith('/my-orders/') || currentPath.startsWith('/my-pets/') || currentPath.startsWith('/admin/orders/');
   const leavePage = productSubpage || otherPage;
   const homeHref = inProducts || otherPage ? '/#trang-chu' : '#trang-chu';
   const accountHref = user ? user.role === 'user' ? '/my-orders' : '/admin/orders' : '/login';
-  const mobileLinks = [[homeHref, 'Trang chủ'], [leavePage ? '/products#danh-muc' : '#danh-muc', 'Danh mục'], ['/products', 'Sản phẩm'], ['/cart', 'Giỏ hàng'], ...(user ? [['/profile', 'Thông tin cá nhân'], ...(user.role === 'user' ? [['/my-orders', 'Đơn hàng của tôi'], ...(vouchersReady ? [['/my-vouchers', 'Voucher của tôi']] : []), ['/wishlist', 'Sản phẩm yêu thích']] : [])] : [['/login', 'Đăng nhập / Đăng ký']]), ['#ve-petcare', 'Về PetCare'], ['#lien-he', 'Liên hệ']];
+  const mobileLinks = [[homeHref, 'Trang chủ'], [leavePage ? '/products#danh-muc' : '#danh-muc', 'Danh mục'], ['/products', 'Sản phẩm'], ['/cart', 'Giỏ hàng'], ...(user ? [['/profile', 'Thông tin cá nhân'], ...(user.role === 'user' ? [['/my-pets', 'Thú cưng của tôi'], ['/my-orders', 'Đơn hàng của tôi'], ...(vouchersReady ? [['/my-vouchers', 'Voucher của tôi']] : []), ['/wishlist', 'Sản phẩm yêu thích']] : [])] : [['/login', 'Đăng nhập / Đăng ký']]), ['#ve-petcare', 'Về PetCare'], ['#lien-he', 'Liên hệ']];
   const showProducts = () => {
     if (leavePage) {
       window.location.assign(query.trim() ? `/products?q=${encodeURIComponent(query)}` : '/products');
@@ -158,6 +158,10 @@ export default function Header({ query, onQueryChange, categories, onCategoryCha
                       <Truck size={16} aria-hidden="true" />
                       <span>Đơn hàng của tôi</span>
                     </a>
+                    <a className="account-menu-item" href="/my-pets" aria-current={currentPath === '/my-pets' || currentPath.startsWith('/my-pets/') ? 'page' : undefined} onClick={() => setAccountOpen(false)}>
+                      <PawPrint size={16} aria-hidden="true" />
+                      <span>Thú cưng của tôi</span>
+                    </a>
                     <a className="account-menu-item" href="/wishlist" aria-current={currentPath === '/wishlist' ? 'page' : undefined} onClick={() => setAccountOpen(false)}>
                       <Heart size={16} aria-hidden="true" />
                       <span>Sản phẩm yêu thích</span>
@@ -198,7 +202,7 @@ export default function Header({ query, onQueryChange, categories, onCategoryCha
         {categories.map((category, index) => <a key={category.category_id} href={leavePage ? `/products?category=${category.category_id}` : '#san-pham'} onClick={leavePage ? undefined : () => onCategoryChange(String(category.category_id))}>{category.name}{index < 2 && <ChevronDown size={13} />}</a>)}
         <a href="#lien-he">Liên hệ</a>
       </nav></div>
-      {menuOpen && <nav id="mobile-menu" className="mobile-nav" aria-label="Điều hướng trên điện thoại">{mobileLinks.map(([href, label]) => <a key={label} href={href} aria-current={['/profile', '/my-vouchers', '/admin/products', '/admin/categories', '/admin/users', '/admin/vouchers'].includes(href) && currentPath === href ? 'page' : href === '/products' && inProducts ? (productSubpage ? 'location' : 'page') : !inProducts && !otherPage && href === homeHref ? 'page' : undefined} onClick={() => { if (href === '/login') beginLogin(); setMenuOpen(false); }}>{label}</a>)}</nav>}
+      {menuOpen && <nav id="mobile-menu" className="mobile-nav" aria-label="Điều hướng trên điện thoại">{mobileLinks.map(([href, label]) => <a key={label} href={href} aria-current={(['/profile', '/my-pets', '/my-vouchers', '/admin/products', '/admin/categories', '/admin/users', '/admin/vouchers'].includes(href) && (currentPath === href || (href === '/my-pets' && currentPath.startsWith('/my-pets/')))) ? 'page' : href === '/products' && inProducts ? (productSubpage ? 'location' : 'page') : !inProducts && !otherPage && href === homeHref ? 'page' : undefined} onClick={() => { if (href === '/login') beginLogin(); setMenuOpen(false); }}>{label}</a>)}</nav>}
     </header>
   );
 }

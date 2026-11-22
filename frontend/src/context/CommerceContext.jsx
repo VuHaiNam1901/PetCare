@@ -6,6 +6,7 @@ import * as adminUsersApi from '../services/admin-users.js';
 import * as profileApi from '../services/profile.js';
 import * as reviewsApi from '../services/reviews.js';
 import * as vouchersApi from '../services/vouchers.js';
+import * as petsApi from '../services/pets.js';
 import { AUTH_REDIRECT_KEY, activeAuthRedirect, authPageUrl, clearAuthRedirect, loginReturnUrl, purchaseLoginUrl, safeReturnUrl } from '../utils/auth-navigation.js';
 import { clearCheckoutDraft, prepareCheckoutDraft, readCheckoutDraft } from '../utils/checkout.js';
 import { activateChatIdentity, chatIdentity, clearChatOnLogout, completeChatLogin } from '../utils/chat-session.js';
@@ -281,7 +282,7 @@ export function CommerceProvider({ children }) {
           activateChatIdentity(chatIdentity(result.user));
           userRef.current = result.user; setUser(result.user);
           const path = window.location.pathname.replace(/\/+$/, '');
-          if (path === '/wishlist' || path === '/my-vouchers' || path === '/my-orders' || path.startsWith('/my-orders/') || path === '/admin/orders' || path.startsWith('/admin/orders/') || path === '/admin/products' || path === '/admin/categories' || path === '/admin/users' || path === '/admin/vouchers' || path === '/profile') {
+          if (path === '/wishlist' || path === '/my-pets' || path.startsWith('/my-pets/') || path === '/my-vouchers' || path === '/my-orders' || path.startsWith('/my-orders/') || path === '/admin/orders' || path.startsWith('/admin/orders/') || path === '/admin/products' || path === '/admin/categories' || path === '/admin/users' || path === '/admin/vouchers' || path === '/profile') {
             await synchronize(result.user, generation, { readOnly: true });
           } else {
             await withGuestLock(async () => {
@@ -612,6 +613,28 @@ export function CommerceProvider({ children }) {
   const searchVoucherCustomers = (options = {}) => voucherRequest('admin', token => vouchersApi.searchVoucherCustomers(token, options), options);
   const getAdminVoucherAssignments = (id, options = {}) => voucherRequest('admin', token => vouchersApi.getVoucherAssignments(token, id, options), options);
   const grantAdminVoucher = (id, userIds) => voucherRequest('admin', token => vouchersApi.grantVoucher(token, id, userIds));
+  async function petRequest(action, { signal } = {}) {
+    if (!userRef.current || !tokenRef.current) throw Object.assign(new Error('Vui lòng đăng nhập để quản lý hồ sơ thú cưng.'), { status: 401 });
+    if (userRef.current.role !== 'user') throw Object.assign(new Error('Chỉ tài khoản khách hàng được sử dụng hồ sơ thú cưng.'), { status: 403 });
+    const generation = epoch.current;
+    try {
+      const result = await action(tokenRef.current);
+      current(generation);
+      if (signal?.aborted) throw Object.assign(new Error('Yêu cầu đã được hủy.'), { name: 'AbortError' });
+      return result;
+    } catch (error) {
+      current(generation);
+      if (!error.obsolete && !signal?.aborted) await expireSession(error);
+      throw error;
+    }
+  }
+  const getPets = (options = {}) => petRequest(token => petsApi.listPets(token, options), options);
+  const getPet = (petId, options = {}) => petRequest(token => petsApi.getPet(token, petId, options), options);
+  const createPet = body => petRequest(token => petsApi.createPet(token, body));
+  const updatePet = (petId, body) => petRequest(token => petsApi.updatePet(token, petId, body));
+  const setDefaultPet = petId => petRequest(token => petsApi.setDefaultPet(token, petId));
+  const deletePet = petId => petRequest(token => petsApi.deletePet(token, petId));
+  const getPetProducts = (petId, options = {}) => petRequest(token => petsApi.getPetProducts(token, petId, options), options);
   async function accountProfileRequest(action, { signal, revision } = {}) {
     if (!userRef.current || !tokenRef.current) throw Object.assign(new Error('Vui lòng đăng nhập để xem thông tin cá nhân.'), { status: 401 });
     const generation = epoch.current;
@@ -738,7 +761,7 @@ export function CommerceProvider({ children }) {
     return false;
   }
 
-  return <Context.Provider value={{ user, authLoading, cart, cartLoading, cartError, busy, cartSource, mergeError, mergeConflicts, mergeCanEdit, pendingIntent, beginLogin, login, register, logout, retryCart, retryMerge, addItem, updateItem, removeItem, selectItem, selectAll, checkout, buyNow, resumeCheckout, submitOrder, orderCommitted, getOrders, getOrder, getOrderPayment, cancelOrder, getWishlist, saveWishlistProduct, getAdminOrders, getAdminOrder, approveAdminOrder, rejectAdminOrder, updateAdminOrder, getAdminProducts, getAdminProductCategories, getAdminPetTypes, createAdminProduct, updateAdminProduct, stopAdminProduct, getAdminCategories, createAdminCategory, updateAdminCategory, deleteAdminCategory, getAdminUsers, updateAdminUserStatus, getAdminVouchers, getAdminVoucher, createAdminVoucher, updateAdminVoucher, disableAdminVoucher, quoteCheckoutVoucher, getCheckoutVouchers, getCustomerVouchers, searchVoucherCustomers, getAdminVoucherAssignments, grantAdminVoucher, getProfile, updateProfile, getMyReviews, createProductReview, notify, notice, noticeType, clearNotice: () => setNotice('') }}>{children}</Context.Provider>;
+  return <Context.Provider value={{ user, authLoading, cart, cartLoading, cartError, busy, cartSource, mergeError, mergeConflicts, mergeCanEdit, pendingIntent, beginLogin, login, register, logout, retryCart, retryMerge, addItem, updateItem, removeItem, selectItem, selectAll, checkout, buyNow, resumeCheckout, submitOrder, orderCommitted, getOrders, getOrder, getOrderPayment, cancelOrder, getWishlist, saveWishlistProduct, getAdminOrders, getAdminOrder, approveAdminOrder, rejectAdminOrder, updateAdminOrder, getAdminProducts, getAdminProductCategories, getAdminPetTypes, createAdminProduct, updateAdminProduct, stopAdminProduct, getAdminCategories, createAdminCategory, updateAdminCategory, deleteAdminCategory, getAdminUsers, updateAdminUserStatus, getAdminVouchers, getAdminVoucher, createAdminVoucher, updateAdminVoucher, disableAdminVoucher, quoteCheckoutVoucher, getCheckoutVouchers, getCustomerVouchers, searchVoucherCustomers, getAdminVoucherAssignments, grantAdminVoucher, getProfile, updateProfile, getMyReviews, createProductReview, getPets, getPet, createPet, updatePet, setDefaultPet, deletePet, getPetProducts, notify, notice, noticeType, clearNotice: () => setNotice('') }}>{children}</Context.Provider>;
 }
 
 export function useCommerce() {

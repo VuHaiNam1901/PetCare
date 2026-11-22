@@ -1,0 +1,644 @@
+.my-pets-page .my-orders-page-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.my-pets-heading-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.my-pets-toolbar {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 18px 20px;
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  background: #fff;
+  margin-bottom: 18px;
+}
+
+.my-pets-toolbar-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.my-pets-toolbar-top h2 {
+  font-size: 17px;
+  color: var(--color-text);
+}
+
+.my-pets-toolbar-top p {
+  font-size: 13px;
+  color: var(--color-muted);
+}
+
+.my-pets-species-filters {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.my-pets-filter-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--color-border);
+  background: var(--color-page);
+  color: var(--color-text);
+  font-size: 12.5px;
+  font-weight: 500;
+  transition: background-color 0.16s ease, border-color 0.16s ease, color 0.16s ease;
+}
+
+.my-pets-filter-chip:hover {
+  border-color: var(--color-primary);
+  background: var(--color-section);
+}
+
+.my-pets-filter-chip.is-active {
+  background: var(--color-primary);
+  border-color: var(--color-primary);
+  color: #fff;
+}
+
+.my-pets-filter-chip:focus-visible,
+.my-pets-card-actions a:focus-visible,
+.my-pets-card-actions button:focus-visible,
+.my-pets-form-card input:focus-visible,
+.my-pets-form-card select:focus-visible,
+.my-pets-form-card textarea:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+.my-pets-form-card {
+  padding: 22px;
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  background: #fff;
+  margin-bottom: 20px;
+}
+
+.my-pets-form-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding-bottom: 14px;
+  margin-bottom: 18px;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.my-pets-form-header h2 {
+  font-size: 18px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.my-pets-species-picker {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 18px;
+}
+
+.my-pets-species-option {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 7px;
+  padding: 10px 8px;
+  border: 1.5px solid var(--color-border);
+  border-radius: 10px;
+  background: var(--color-page);
+  color: var(--color-text);
+  font-size: 12.5px;
+  font-weight: 600;
+  text-align: center;
+  transition: border-color 0.16s ease, background-color 0.16s ease, transform 0.16s ease;
+}
+
+.my-pets-species-option:hover {
+  border-color: var(--color-primary);
+  background: var(--color-section);
+}
+
+.my-pets-species-option.is-selected {
+  border-color: var(--color-primary);
+  background: var(--color-section);
+  color: var(--color-primary-hover);
+  box-shadow: 0 0 0 2px rgba(47, 128, 237, 0.14);
+}
+
+.my-pets-species-option img {
+  width: 48px;
+  height: 48px;
+  border-radius: 999px;
+  object-fit: cover;
+  border: 2px solid #fff;
+  box-shadow: 0 2px 6px rgba(23, 50, 77, 0.1);
+}
+
+.my-pets-preset-note {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  border-radius: 8px;
+  background: var(--color-section);
+  font-size: 12.5px;
+  color: var(--color-text);
+  margin-bottom: 16px;
+}
+
+.my-pets-preset-note img {
+  width: 40px;
+  height: 40px;
+  border-radius: 999px;
+  object-fit: cover;
+  flex-shrink: 0;
+}
+
+.my-pets-form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px 16px;
+}
+
+.my-pets-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.my-pets-field-full {
+  grid-column: 1 / -1;
+}
+
+.my-pets-field label {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.my-pets-field input,
+.my-pets-field select,
+.my-pets-field textarea {
+  width: 100%;
+  padding: 9px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--color-text);
+  font-family: inherit;
+  font-size: 13.5px;
+}
+
+.my-pets-field textarea {
+  min-height: 76px;
+  resize: vertical;
+}
+
+.my-pets-checkbox {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 14px;
+  font-size: 13.5px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.my-pets-checkbox input {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--color-primary);
+}
+
+.my-pets-form-error {
+  margin-top: 12px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: #fff1f2;
+  border: 1px solid #fecdd3;
+  color: #be123c;
+  font-size: 13px;
+}
+
+.my-pets-form-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 18px;
+  flex-wrap: wrap;
+}
+
+.my-pets-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.my-pet-card {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 18px;
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  background: #fff;
+  min-width: 0;
+}
+
+.my-pet-card.is-default {
+  border-color: var(--color-primary);
+  box-shadow: 0 4px 14px rgba(47, 128, 237, 0.08);
+}
+
+.my-pet-card-top {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+}
+
+.my-pet-avatar {
+  width: 64px;
+  height: 64px;
+  border-radius: 999px;
+  object-fit: cover;
+  border: 2px solid var(--color-section);
+  flex-shrink: 0;
+}
+
+.my-pet-identity {
+  min-width: 0;
+  flex: 1;
+}
+
+.my-pet-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.my-pet-title-row h3 {
+  font-size: 17px;
+  color: var(--color-text);
+  overflow-wrap: anywhere;
+}
+
+.my-pet-default-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  background: var(--color-section);
+  color: var(--color-primary-hover);
+  font-size: 11.5px;
+  font-weight: 700;
+}
+
+.my-pet-species-line {
+  margin-top: 3px;
+  font-size: 13px;
+  color: var(--color-muted);
+}
+
+.my-pet-meta {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 12px;
+  margin: 0;
+  padding: 12px;
+  border-radius: 8px;
+  background: var(--color-page);
+  font-size: 12.5px;
+}
+
+.my-pet-meta div {
+  min-width: 0;
+}
+
+.my-pet-meta dt {
+  color: var(--color-muted);
+  font-size: 11.5px;
+}
+
+.my-pet-meta dd {
+  margin: 2px 0 0;
+  font-weight: 600;
+  color: var(--color-text);
+  overflow-wrap: anywhere;
+}
+
+.my-pet-notes {
+  font-size: 12.5px;
+  color: var(--color-text);
+  background: #f8fbff;
+  border-left: 3px solid var(--color-accent);
+  padding: 8px 10px;
+  border-radius: 0 6px 6px 0;
+  overflow-wrap: anywhere;
+}
+
+.my-pets-card-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: auto;
+  padding-top: 4px;
+}
+
+.my-pets-card-actions .button {
+  padding: 7px 11px;
+  font-size: 12.5px;
+}
+
+.my-pets-btn-danger {
+  color: #be123c;
+  border-color: #fecdd3;
+  background: #fff;
+}
+
+.my-pets-btn-danger:hover:not(:disabled) {
+  background: #fff1f2;
+  border-color: #fda4af;
+}
+
+.my-pets-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 44px 22px;
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  background: #fff;
+  text-align: center;
+}
+
+.my-pets-state > svg {
+  color: var(--color-primary-hover);
+}
+
+.my-pets-state h2 {
+  font-size: 19px;
+}
+
+.my-pets-state p {
+  max-width: 460px;
+  color: var(--color-muted);
+  font-size: 13px;
+}
+
+.my-pet-detail-card {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  padding: 24px;
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  background: #fff;
+}
+
+.my-pet-detail-hero {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  flex-wrap: wrap;
+}
+
+.my-pet-detail-avatar {
+  width: 84px;
+  height: 84px;
+  border-radius: 999px;
+  object-fit: cover;
+  border: 3px solid var(--color-section);
+}
+
+.my-pet-detail-history-note {
+  padding: 12px 14px;
+  border-radius: 8px;
+  border: 1px dashed var(--color-border);
+  background: var(--color-page);
+  color: var(--color-muted);
+  font-size: 13px;
+}
+
+.my-pets-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 120;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background: rgba(23, 50, 77, 0.45);
+}
+
+.my-pets-modal {
+  width: 100%;
+  max-width: 420px;
+  padding: 22px;
+  border-radius: 12px;
+  background: #fff;
+  border: 1px solid var(--color-border);
+  box-shadow: 0 18px 40px rgba(23, 50, 77, 0.22);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.my-pets-modal h2 {
+  font-size: 18px;
+}
+
+.my-pets-modal p {
+  font-size: 13.5px;
+  color: var(--color-muted);
+}
+
+@media (max-width: 900px) {
+  .my-pets-species-picker {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+.my-pet-history-section {
+  margin-top: 8px;
+  padding-top: 18px;
+  border-top: 1px solid var(--color-border);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.my-pet-history-heading h3 {
+  font-size: 17px;
+  color: var(--color-text);
+}
+
+.my-pet-history-heading p {
+  margin-top: 4px;
+  font-size: 12.5px;
+  color: var(--color-muted);
+}
+
+.my-pet-history-group {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.my-pet-history-group h4 {
+  font-size: 13.5px;
+  color: var(--color-text);
+}
+
+.my-pet-history-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.my-pet-history-item {
+  display: grid;
+  grid-template-columns: 58px minmax(0, 1fr);
+  gap: 12px;
+  align-items: start;
+  padding: 12px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-page);
+}
+
+.my-pet-history-item.is-pending {
+  background: #fffdf8;
+  border-color: #f3dfb6;
+}
+
+.my-pet-history-image {
+  width: 58px;
+  height: 58px;
+  border-radius: 6px;
+  overflow: hidden;
+  border: 1px solid var(--color-border);
+  background: #fff;
+}
+
+.my-pet-history-copy {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.my-pet-history-title-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.my-pet-history-title-row a {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--color-text);
+  overflow-wrap: anywhere;
+}
+
+.my-pet-history-title-row a:hover {
+  color: var(--color-primary-hover);
+}
+
+.my-pet-history-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.my-pet-history-badge.is-completed {
+  background: #ecf9f3;
+  color: #1e6b4f;
+}
+
+.my-pet-history-badge.is-pending {
+  background: #fff5df;
+  color: #8a5b14;
+}
+
+.my-pet-history-meta {
+  font-size: 12px;
+  color: var(--color-muted);
+}
+
+.my-pet-history-meta a {
+  color: var(--color-primary-hover);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.my-pet-history-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 16px;
+  border: 1px dashed var(--color-border);
+  border-radius: 8px;
+  background: var(--color-page);
+  font-size: 13px;
+  color: var(--color-muted);
+}
+
+@media (max-width: 700px) {
+  .my-pets-grid,
+  .my-pets-form-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .my-pets-form-card,
+  .my-pet-card,
+  .my-pet-detail-card {
+    padding: 16px;
+  }
+
+  .my-pets-species-picker {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .my-pet-history-item {
+    grid-template-columns: 48px minmax(0, 1fr);
+    padding: 10px;
+  }
+
+  .my-pet-history-image {
+    width: 48px;
+    height: 48px;
+  }
+}

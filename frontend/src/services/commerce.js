@@ -25,6 +25,7 @@ const orderMessages = {
   ONLINE_PAYMENT_AMOUNT_UNSUPPORTED: 'Số tiền không được hỗ trợ bởi thanh toán QR. Vui lòng chọn COD hoặc điều chỉnh đơn hàng.',
   IDEMPOTENCY_CONFLICT: 'Yêu cầu đặt hàng đã thay đổi. Vui lòng giữ nguyên lần đặt hàng đang chờ kết quả.',
   ORDER_RETRY: 'Đơn hàng đang được xử lý. Vui lòng thử lại để nhận kết quả.',
+  INVALID_ORDER_PET: 'Một hoặc nhiều hồ sơ thú cưng đã chọn không còn hợp lệ. Vui lòng chọn lại hoặc bỏ chọn thú cưng.',
 };
 
 export async function commerceApi(path, { method = 'GET', body, token, headers = {}, signal, cache } = {}) {

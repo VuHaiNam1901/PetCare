@@ -9,7 +9,7 @@ export function safeReturnUrl(value, fallback = '/') {
   try {
     const url = new URL(value, window.location.origin);
     if (url.origin !== window.location.origin || /%2f|%5c/i.test(url.pathname)) return fallback;
-    if (!['/', '/products', '/cart', '/checkout', '/my-orders', '/my-vouchers', '/wishlist', '/profile', '/admin/orders', '/admin/products', '/admin/categories', '/admin/users', '/admin/vouchers'].includes(url.pathname) && !/^\/(?:products|my-orders|admin\/orders)\/[1-9]\d*$/.test(url.pathname) && !/^\/products\/[1-9]\d*\/reviews$/.test(url.pathname) && !/^\/my-orders\/[1-9]\d*\/review\/[1-9]\d*$/.test(url.pathname)) return fallback;
+    if (!['/', '/products', '/cart', '/checkout', '/my-orders', '/my-pets', '/my-vouchers', '/wishlist', '/profile', '/admin/orders', '/admin/products', '/admin/categories', '/admin/users', '/admin/vouchers'].includes(url.pathname) && !/^\/(?:products|my-orders|my-pets|admin\/orders)\/[1-9]\d*$/.test(url.pathname) && !/^\/products\/[1-9]\d*\/reviews$/.test(url.pathname) && !/^\/my-orders\/[1-9]\d*\/review\/[1-9]\d*$/.test(url.pathname)) return fallback;
     return `${url.pathname}${url.search}${url.hash}`;
   } catch { return fallback; }
 }

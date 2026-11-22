@@ -10,6 +10,7 @@ const pages = {
     '/': ['home', 'Trang chủ'], '/products': ['products', 'Danh sách sản phẩm'], '/cart': ['cart', 'Giỏ hàng'],
     '/checkout': ['checkout', 'Đặt hàng'], '/login': ['login', 'Đăng nhập'], '/register': ['register', 'Đăng ký'],
     '/profile': ['profile', 'Thông tin cá nhân'], '/my-orders': ['orders', 'Đơn hàng của tôi'], '/wishlist': ['wishlist', 'Sản phẩm yêu thích'],
+    '/my-pets': ['pets', 'Thú cưng của tôi'],
 };
 const fields = {
     home: ['search_active', 'category_id', 'pet_filter_active', 'sort', 'page', 'category_filter_visible', 'pet_filter_visible', 'reset_visible', 'can_load_more'],
@@ -20,6 +21,7 @@ const fields = {
         'voucher_visible', 'voucher_selected', 'voucher_needs_check', 'voucher_busy', 'voucher_disabled'],
     orders: ['status_filter', 'page', 'has_orders'], order: ['cancel_dialog', 'cancel_error', 'cancel_visible', 'cancel_reason_valid'],
     review: ['reviewed', 'review_blocked'], reviews: ['page'], wishlist: ['has_items'],
+    pets: ['has_pets'], pet: ['editing', 'has_pets'],
 };
 const enums = { phase: ['loading', 'ready', 'error', 'not_found'], sort: ['newest', 'price-asc', 'price-desc'],
     payment_method: ['COD', 'ONLINE'], status_filter: ['', ...statuses] };
@@ -36,6 +38,10 @@ function pageForRoute(path) {
     if (match && positive(Number(match[1])) && (!match[2] || positive(Number(match[2])))) return {
         key: match[2] ? 'review' : 'order', name: match[2] ? 'Đánh giá sản phẩm' : 'Chi tiết đơn hàng', route,
         order_id: Number(match[1]), ...(match[2] ? { product_id: Number(match[2]) } : {}),
+    };
+    match = route.match(/^\/my-pets\/([1-9]\d*)$/);
+    if (match && positive(Number(match[1]))) return {
+        key: 'pet', name: 'Chi tiết thú cưng', route, pet_id: Number(match[1]),
     };
     return null;
 }
@@ -136,6 +142,16 @@ function actionsFor(context) {
     } else if (page.key === 'wishlist') {
         add('continue_shopping', 'Tiếp tục mua sắm', true, true);
         add('wishlist', 'Bỏ yêu thích', ready === true && auth.authenticated && s.has_items === true, idle);
+    } else if (page.key === 'pets') {
+        add('add_pet', 'Thêm thú cưng', ready === true && auth.authenticated, idle);
+        add('view_pet', 'Xem chi tiết', ready === true && auth.authenticated && s.has_pets === true, true);
+        add('set_default_pet', 'Đặt mặc định', ready === true && auth.authenticated && s.has_pets === true, idle);
+        add('delete_pet', 'Xóa', ready === true && auth.authenticated && s.has_pets === true, idle);
+    } else if (page.key === 'pet') {
+        add('edit_pet', 'Chỉnh sửa', ready === true && auth.authenticated && s.editing === false, idle);
+        add('save_pet', 'Lưu thay đổi', ready === true && auth.authenticated && s.editing === true, idle);
+        add('set_default_pet', 'Đặt mặc định', ready === true && auth.authenticated, idle);
+        add('delete_pet', 'Xóa', ready === true && auth.authenticated, idle);
     }
     return actions;
 }

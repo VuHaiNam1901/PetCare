@@ -468,3 +468,7 @@ playwright-traces/
 # Completed implementation and image-cleanup reports; retain recovery metadata
 /frontend/HOMEPAGE_UPDATE.md
 /image-migration/archive/*/REPORT.md
+
+# Local database dumps (never commit to GitHub)
+*.sql
+*.sql.gz

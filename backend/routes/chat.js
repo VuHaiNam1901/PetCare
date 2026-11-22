@@ -198,6 +198,7 @@ function createChatRouter({ assistant, store, limiter = createChatLimiter(), ses
                     const memory = await session.loadMemory();
                     const pageContext = pageObservation ? await pageContextResolver(pageObservation, { userId }) : null;
                     assistantInput = { message: body.message, turn_id: `u:${requestId}`, signal: controller.signal,
+                        ...(userId ? { user_id: userId } : {}),
                         ...(memory === null ? { history: await session.history() } : { memory }),
                         ...(pageContext ? { page_context: pageContext } : {}) };
                 } else assistantInput = { message: body.message, history: await session.history() };

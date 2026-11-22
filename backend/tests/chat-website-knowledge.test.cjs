@@ -31,7 +31,7 @@ function guideAssistant(topics, advice, inspect = () => {}) {
 }
 
 test('knowledge: source references exist; retrieval is bounded and excludes source paths or private data', () => {
-    assert.equal(entries.length, 20);
+    assert.equal(entries.length, 21);
     for (const entry of entries) {
         for (const key of ['id', 'name', 'purpose', 'availability']) assert.ok(typeof entry[key] === 'string' && entry[key]);
         for (const key of ['routes', 'steps', 'conditions', 'unavailable', 'notes', 'labels', 'sources']) assert.ok(Array.isArray(entry[key]) && entry[key].length);

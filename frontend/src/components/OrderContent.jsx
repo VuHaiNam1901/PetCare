@@ -46,7 +46,14 @@ export function OrderItems({ items, orderId, className = '', itemClassName = '' 
       const source = resolveImageUrl(item.image_url);
       return <li className={`my-order-item ${itemClassName}`} key={item.order_detail_id || item.product_id} data-product-id={item.product_id}>
         <a className="my-order-image" href={`/products/${item.product_id}`} aria-label={`Xem sản phẩm ${item.name}`}><ProductImage key={source} source={source} name={item.name} width={64} height={64} /></a>
-        <div className="my-order-item-copy"><h3><a href={`/products/${item.product_id}`}>{item.name}</a></h3><p>Đơn giá: {formatPrice(item.unit_price)}</p><span>Số lượng: <strong>{item.quantity}</strong></span></div>
+        <div className="my-order-item-copy">
+          <h3><a href={`/products/${item.product_id}`}>{item.name}</a></h3>
+          <p>Đơn giá: {formatPrice(item.unit_price)}</p>
+          <span>Số lượng: <strong>{item.quantity}</strong></span>
+          {Array.isArray(item.pets) && item.pets.length > 0 && (
+            <p className="my-order-item-pets">Dành cho: <strong>{item.pets.map(p => p.pet_name_snapshot).join(', ')}</strong></p>
+          )}
+        </div>
         <p className="my-order-item-total">{formatPrice(item.subtotal)}</p>
       </li>;
     })}

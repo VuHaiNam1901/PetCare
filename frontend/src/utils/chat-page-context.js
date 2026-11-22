@@ -6,7 +6,7 @@ const booleans = ['busy', 'has_draft', 'form_visible', 'locked', 'pending_submis
   'voucher_needs_check', 'voucher_busy', 'editing', 'cancel_dialog', 'cancel_error', 'cancel_reason_valid',
   'reviewed', 'review_blocked', 'search_active', 'pet_filter_active', 'has_orders', 'preview_loading', 'submit_disabled',
   'purchase_disabled', 'quantity_disabled', 'cancel_visible', 'category_filter_visible', 'pet_filter_visible',
-  'reset_visible', 'can_load_more', 'has_items', 'completed', 'voucher_disabled'];
+  'reset_visible', 'can_load_more', 'has_items', 'has_pets', 'completed', 'voucher_disabled'];
 const integers = ['quantity', 'category_id', 'page'];
 const enums = {
   phase: ['loading', 'ready', 'error', 'not_found'],
@@ -18,8 +18,8 @@ const enums = {
 export function customerChatRoute(pathname) {
   if (typeof pathname !== 'string' || pathname.length > 160) return null;
   const route = pathname.replace(/\/+$/, '') || '/';
-  if (['/', '/products', '/cart', '/checkout', '/login', '/register', '/profile', '/my-orders', '/wishlist'].includes(route)) return route;
-  const match = route.match(/^\/(?:products\/([1-9]\d*)(?:\/reviews)?|my-orders\/([1-9]\d*)(?:\/review\/([1-9]\d*))?)$/);
+  if (['/', '/products', '/cart', '/checkout', '/login', '/register', '/profile', '/my-orders', '/my-pets', '/wishlist'].includes(route)) return route;
+  const match = route.match(/^\/(?:products\/([1-9]\d*)(?:\/reviews)?|my-orders\/([1-9]\d*)(?:\/review\/([1-9]\d*))?|my-pets\/([1-9]\d*))$/);
   return match && match.slice(1).filter(Boolean).every(id => positive(Number(id))) ? route : null;
 }
 

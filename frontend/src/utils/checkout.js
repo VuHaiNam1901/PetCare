@@ -34,6 +34,27 @@ function purchaseItems(items) {
   return items.map(({ product_id, quantity }) => ({ product_id, quantity }));
 }
 
+function normalizeItemPets(raw, items) {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {};
+  const validProducts = new Set(items.map(item => String(item.product_id)));
+  const clean = {};
+  for (const [key, list] of Object.entries(raw)) {
+    if (!validProducts.has(String(key)) || !Array.isArray(list)) continue;
+    const unique = [...new Set(list.map(Number).filter(positive))].sort((a, b) => a - b).slice(0, 10);
+    if (unique.length) clean[key] = unique;
+  }
+  return clean;
+}
+
+function submissionItemsMatch(submissionItems, draftItems) {
+  const base = purchaseItems(submissionItems);
+  if (!base || JSON.stringify(base) !== JSON.stringify(purchaseItems(draftItems))) return false;
+  return submissionItems.every(item =>
+    item.pet_ids === undefined ||
+    (Array.isArray(item.pet_ids) && item.pet_ids.length <= 10 && item.pet_ids.every(positive))
+  );
+}
+
 export function readCheckoutDraft(userId) {
   try {
     const draft = JSON.parse(sessionStorage.getItem(CHECKOUT_DRAFT_KEY) || 'null');
@@ -43,10 +64,11 @@ export function readCheckoutDraft(userId) {
     if (!draft.shipping || shippingFields.some(field => typeof draft.shipping[field] !== 'string') || !['COD', 'ONLINE'].includes(draft.payment_method)) return null;
     if (voucherCode(draft.voucher_code) === null || (draft.submission && voucherCode(draft.submission.payload?.voucher_code) === null)) return null;
     if (draft.submission && (typeof draft.submission.key !== 'string' || !draft.submission.payload ||
-      !purchaseItems(draft.submission.payload.items) || draft.submission.payload.source !== draft.type ||
-      JSON.stringify(draft.submission.payload.items) !== JSON.stringify(purchaseItems(draft.items)))) return null;
+      draft.submission.payload.source !== draft.type ||
+      !submissionItemsMatch(draft.submission.payload.items, draft.items))) return null;
     if (draft.order && (!positive(draft.order.order_id) || typeof draft.order.total_amount !== 'string' || !Array.isArray(draft.order.items))) return null;
-    return { ...draft, voucher_code: voucherCode(draft.voucher_code), items: purchaseItems(draft.items), prices: draft.prices && typeof draft.prices === 'object' && !Array.isArray(draft.prices) ? draft.prices : {} };
+    const cleanItems = purchaseItems(draft.items);
+    return { ...draft, voucher_code: voucherCode(draft.voucher_code), items: cleanItems, item_pets: normalizeItemPets(draft.item_pets, cleanItems), prices: draft.prices && typeof draft.prices === 'object' && !Array.isArray(draft.prices) ? draft.prices : {} };
   } catch { return null; }
 }
 
@@ -79,6 +101,7 @@ export function prepareCheckoutDraft(intent, account = null, referencePrices = {
     if (typeof value === 'string' && /^\d+(?:\.\d{1,2})?$/.test(value)) prices[item.product_id] = value;
   }
   return persist({ version: 1, intent_id: intent.id, type: intent.type, user_id: owner, items,
+    item_pets: keep ? normalizeItemPets(existing.item_pets, items) : {},
     shipping, payment_method: keep ? existing.payment_method : 'COD', prices, voucher_code: keep ? existing.voucher_code || '' : '',
     submission: keep ? existing.submission || null : null, order: keep ? existing.order || null : null });
 }
@@ -87,12 +110,13 @@ export function prepareCheckoutDraft(intent, account = null, referencePrices = {
 export function saveCheckoutDraft(userId, patch) {
   const draft = readCheckoutDraft(userId);
   if (!draft || (patch.intent_id && patch.intent_id !== draft.intent_id)) throw new Error('Bản nháp đặt hàng không còn thuộc phiên hiện tại. Vui lòng chọn lại sản phẩm.');
-  if ((draft.submission || draft.order) && (patch.shipping || patch.payment_method || Object.hasOwn(patch, 'voucher_code'))) throw new Error('Vui lòng nhận kết quả lần đặt hàng hiện tại trước khi thay đổi thông tin.');
+  if ((draft.submission || draft.order) && (patch.shipping || patch.payment_method || patch.item_pets || Object.hasOwn(patch, 'voucher_code'))) throw new Error('Vui lòng nhận kết quả lần đặt hàng hiện tại trước khi thay đổi thông tin.');
   const code = Object.hasOwn(patch, 'voucher_code') ? voucherCode(patch.voucher_code) : draft.voucher_code || '';
   if (code === null) throw new Error('Mã Voucher chỉ gồm 1–64 chữ cái, chữ số, dấu gạch ngang hoặc gạch dưới.');
   const shipping = { ...draft.shipping };
   for (const field of shippingFields) if (typeof patch.shipping?.[field] === 'string') shipping[field] = patch.shipping[field];
   const payment_method = ['COD', 'ONLINE'].includes(patch.payment_method) ? patch.payment_method : draft.payment_method;
+  const item_pets = Object.hasOwn(patch, 'item_pets') ? normalizeItemPets(patch.item_pets, draft.items) : (draft.item_pets || {});
   let prices = draft.prices;
   if (patch.prices && typeof patch.prices === 'object') {
     prices = {};
@@ -101,7 +125,7 @@ export function saveCheckoutDraft(userId, patch) {
       if (typeof price === 'string' && /^\d+(?:\.\d{1,2})?$/.test(price)) prices[item.product_id] = price;
     }
   }
-  return persist({ ...draft, shipping, payment_method, prices, voucher_code: code });
+  return persist({ ...draft, shipping, payment_method, item_pets, prices, voucher_code: code });
 }
 
 export function beginCheckoutSubmission(userId) {
@@ -109,10 +133,17 @@ export function beginCheckoutSubmission(userId) {
   if (!draft || draft.order) throw new Error('Không có lần đặt hàng mới để xác nhận.');
   if (draft.submission) return draft;
   if (Object.keys(validateShipping(draft.shipping)).length) throw new Error('Vui lòng kiểm tra lại thông tin nhận hàng.');
+  const itemPets = draft.item_pets || {};
   const submission = {
     key: crypto.randomUUID(),
     payload: {
-      source: draft.type, items: draft.items.map(item => ({ ...item })),
+      source: draft.type,
+      items: draft.items.map(item => {
+        const selectedPets = itemPets[String(item.product_id)];
+        return Array.isArray(selectedPets) && selectedPets.length
+          ? { product_id: item.product_id, quantity: item.quantity, pet_ids: [...selectedPets] }
+          : { product_id: item.product_id, quantity: item.quantity };
+      }),
       recipient_name: draft.shipping.recipient_name.trim(), phone: draft.shipping.phone.trim(),
       shipping_address: draft.shipping.address.trim(), note: draft.shipping.note.trim() || null,
       payment_method: draft.payment_method,

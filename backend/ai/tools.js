@@ -84,7 +84,7 @@ function product(row) {
         pet_types: petTypes, description: safeText(row.description, 800, true), source: 'MySQL' };
 }
 
-function searchFilters(input, memory) {
+function searchFilters(input, memory, { observedPets = [] } = {}) {
     object(input, [], FILTER_KEYS);
     let filters;
     try { filters = validateFilters(input); } catch { invalid(); }
@@ -98,10 +98,14 @@ function searchFilters(input, memory) {
         if (min !== null && filters.minPrice === undefined) filters.minPrice = min;
         if (max !== null && filters.maxPrice === undefined) filters.maxPrice = max;
     }
+    const observedSlugs = new Set((observedPets || []).map(item => item?.species_slug).filter(Boolean));
     const species = active.pet?.species;
-    if (species?.source.kind === 'user' && ['cat', 'dog'].includes(species.value)) {
-        if (filters.species !== undefined && filters.species !== species.value) invalid();
-        filters.species = species.value;
+    if (species?.source.kind === 'user' && PET_SPECIES.includes(species.value)) {
+        const allowedByObserved = filters.species !== undefined && observedSlugs.has(filters.species);
+        if (!allowedByObserved) {
+            if (filters.species !== undefined && filters.species !== species.value) invalid();
+            if (observedSlugs.size === 0) filters.species = species.value;
+        }
     }
     // Semantic query selection belongs to Gemini. This is only a typed default
     // when it omitted a query, not another natural-language intent classifier.
@@ -146,7 +150,7 @@ function createProductTools({ repository = createProductRepository(), now = () =
         return { products: requested.filter(value => byId.has(value)).map(value => byId.get(value)),
             missing_product_ids: requested.filter(value => !byId.has(value)) };
     }
-    return { async execute(name, args, { memory, signal } = {}) {
+    return { async execute(name, args, { memory, signal, observedPets = [] } = {}) {
         if (!NAMES.includes(name)) invalid();
         jsonArguments(args);
         abort(signal);
@@ -171,7 +175,7 @@ function createProductTools({ repository = createProductRepository(), now = () =
             if (args.use_recent_search && !recent) invalid();
             // Reuse only on an explicit model continuation, within the active
             // topic/pet. A new search never silently inherits an old query.
-            const filters = searchFilters({ ...(recent?.filters || {}), ...args.filters }, memory);
+            const filters = searchFilters({ ...(recent?.filters || {}), ...args.filters }, memory, { observedPets });
             const result = await read(() => repository.search(filters, { includeOutOfStock: args.include_out_of_stock === true, signal }), signal);
             if (!result || !Array.isArray(result.products) || !Number.isInteger(result.totalMatches) || result.totalMatches < 0) unavailable();
             const products = result.products.slice(0, filters.limit).map(product);

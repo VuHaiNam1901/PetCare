@@ -27,12 +27,42 @@ async function detail(db, userId, orderId) {
     const [items] = await db.execute(`SELECT d.order_detail_id, d.product_id, p.name, p.image_url,
         d.quantity, d.unit_price, d.subtotal FROM order_details d
         JOIN products p ON p.product_id = d.product_id WHERE d.order_id = ? ORDER BY d.order_detail_id`, [orderId]);
+    let petRows = [];
+    try {
+        const [rows] = await db.execute(
+            `SELECT odp.order_detail_id, odp.pet_id, odp.pet_type_id, pt.slug AS species_slug, pt.name AS species_name, odp.pet_name_snapshot
+             FROM order_detail_pets odp
+             LEFT JOIN pet_types pt ON pt.pet_type_id = odp.pet_type_id
+             WHERE odp.order_id = ?
+             ORDER BY odp.order_detail_id ASC, odp.pet_id ASC`,
+            [orderId]
+        );
+        petRows = rows;
+    } catch (error) {
+        if (!['ER_NO_SUCH_TABLE', 'ER_BAD_FIELD_ERROR'].includes(error.code)) throw error;
+    }
+    const petsByDetail = new Map();
+    for (const row of petRows) {
+        const key = Number(row.order_detail_id);
+        if (!petsByDetail.has(key)) petsByDetail.set(key, []);
+        petsByDetail.get(key).push({
+            pet_id: Number(row.pet_id),
+            pet_type_id: Number(row.pet_type_id),
+            species_slug: row.species_slug || null,
+            species_name: row.species_name || null,
+            pet_name_snapshot: row.pet_name_snapshot,
+        });
+    }
+    const itemsWithPets = items.map(item => ({
+        ...item,
+        pets: petsByDetail.get(Number(item.order_detail_id)) || [],
+    }));
     const events = await history.read(db, orderId);
     const order = publicOrder(decorate(history.withCancellation(clock.normalizeOrderClock(orders[0]), events)));
     if (order.workflow_version === workflow.VERSION) {
         order.refunds = await require('../services/online-orders').readRefunds(db, orderId);
     }
-    return { ...order, items, history: events };
+    return { ...order, items: itemsWithPets, history: events };
 }
 
 const cancellationReasons = Object.freeze({
@@ -101,8 +131,17 @@ exports.cancel = async (userId, orderId, input) => {
 };
 
 exports.create = async (userId, input, key) => {
-    // Keep the canonical legacy payload unchanged when no Voucher is supplied.
-    input = { ...input };
+    // Keep the canonical legacy payload unchanged when no Voucher or pet_ids are supplied.
+    input = {
+        ...input,
+        items: [...input.items].map(item => {
+            const pets = Array.isArray(item.pet_ids)
+                ? [...new Set(item.pet_ids)].filter(pid => Number.isSafeInteger(pid) && pid > 0 && pid <= 2147483647).sort((a, b) => a - b)
+                : [];
+            if (pets.length > 10) fail(400, 'Mỗi sản phẩm chỉ liên kết tối đa 10 thú cưng.', 'INVALID_ORDER_PET');
+            return pets.length ? { product_id: item.product_id, quantity: item.quantity, pet_ids: pets } : { product_id: item.product_id, quantity: item.quantity };
+        }).sort((a, b) => a.product_id - b.product_id),
+    };
     const suppliedCode = input.voucher_code;
     delete input.voucher_code;
     if (suppliedCode != null && suppliedCode !== '') {
@@ -140,6 +179,27 @@ exports.create = async (userId, input, key) => {
         // Checkout owns its quantity snapshot. A merged or edited cart must never
         // silently expand the purchase. Buy now deliberately never touches carts.
         const items = [...input.items].sort((a, b) => a.product_id - b.product_id);
+        const requestedPetIds = [...new Set(items.flatMap(item => item.pet_ids || []))].sort((a, b) => a - b);
+        let petById = new Map();
+        if (requestedPetIds.length) {
+            let petRows;
+            try {
+                const petPlaceholders = requestedPetIds.map(() => '?').join(',');
+                [petRows] = await db.execute(
+                    `SELECT pet_id, pet_type_id, name FROM user_pets WHERE user_id = ? AND deleted_at IS NULL AND pet_id IN (${petPlaceholders}) ORDER BY pet_id FOR SHARE`,
+                    [userId, ...requestedPetIds]
+                );
+            } catch (petError) {
+                if (['ER_NO_SUCH_TABLE', 'ER_BAD_FIELD_ERROR'].includes(petError.code)) {
+                    fail(503, 'Tính năng Hồ sơ thú cưng chưa sẵn sàng.', 'PET_PROFILE_NOT_READY');
+                }
+                throw petError;
+            }
+            petById = new Map(petRows.map(row => [Number(row.pet_id), row]));
+            if (petById.size !== requestedPetIds.length) {
+                fail(400, 'Một hoặc nhiều hồ sơ thú cưng không hợp lệ hoặc không thuộc tài khoản của bạn.', 'INVALID_ORDER_PET');
+            }
+        }
         let cartId;
         const cartItems = new Map();
         if (input.source === 'cart') {
@@ -182,7 +242,17 @@ exports.create = async (userId, input, key) => {
             ...(voucher ? [quote.subtotal_amount, quote.discount_amount, voucher.code] : [])]);
         if (voucher) await require('./voucher').reserveLocked(db, { voucher, orderId: created.insertId, userId, discountAmount: quote.discount_amount });
         for (const line of lines) {
-            await db.execute('INSERT INTO order_details (order_id, product_id, quantity, unit_price, subtotal) VALUES (?, ?, ?, ?, ?)', [created.insertId, line.product_id, line.quantity, line.price, line.subtotal]);
+            const [detailInsert] = await db.execute('INSERT INTO order_details (order_id, product_id, quantity, unit_price, subtotal) VALUES (?, ?, ?, ?, ?)', [created.insertId, line.product_id, line.quantity, line.price, line.subtotal]);
+            if (line.pet_ids?.length) {
+                const values = line.pet_ids.map(petId => {
+                    const pet = petById.get(petId);
+                    return [detailInsert.insertId, created.insertId, userId, petId, line.product_id, pet.pet_type_id, pet.name];
+                });
+                await db.query(
+                    'INSERT INTO order_detail_pets (order_detail_id, order_id, user_id, pet_id, product_id, pet_type_id, pet_name_snapshot) VALUES ?',
+                    [values]
+                );
+            }
             await db.execute('UPDATE products SET stock_quantity = stock_quantity - ? WHERE product_id = ?', [line.quantity, line.product_id]);
         }
         await db.execute(`INSERT INTO payments (order_id, payment_method, payment_status, amount, transaction_date, created_at)

@@ -31,6 +31,7 @@ app.use('/api', catalogRoutes);
 app.use('/api/chat', createChatRouter());
 app.use('/api/cart', cartRoutes);
 app.use('/api/wishlist', require('./routes/wishlist'));
+app.use('/api/pets', require('./routes/pets'));
 app.use('/api/orders', orderRoutes);
 app.use('/api/admin/orders', adminOrderRoutes);
 app.use('/api/admin/vouchers', require('./routes/admin-vouchers'));

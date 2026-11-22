@@ -30,8 +30,13 @@ const CONCEPTS = [
     ['snack', 'banh thuong', 'do an vat', 'treat', 'treats'],
     ['hat', 'thuc an kho', 'dry food', 'kibble'],
     ['thuc an', 'thu can', 'thucan', 'do an', 'food'],
+    ['cat ve sinh', 'nha ve sinh', 'khay ve sinh', 'xeng ve sinh', 'litter'],
     ['meo', 'meoo', 'cat', 'cats'],
-    ['cho', 'dog', 'dogs']
+    ['cho', 'dog', 'dogs'],
+    ['chim', 'bird', 'birds'],
+    ['ca canh', 'fish'],
+    ['hamster', 'chuot hamster', 'chuot'],
+    ['tho', 'rabbit', 'rabbits']
 ];
 const FOOD_TYPES = new Set(['thuc an', 'hat', 'pate', 'snack']);
 const PRODUCT_TYPES = new Set([...FOOD_TYPES, 'dau ca', 'do choi']);
@@ -92,29 +97,37 @@ function validateFilters(input = {}) {
 const contains = (haystack, needle) => (` ${haystack} `).includes(` ${needle} `);
 function searchTerms(query = '') {
     let folded = normalizeText(query);
-    // 'cho mèo' uses cho as a preposition; 'chó' itself remains searchable.
-    const catOnly = /\bmeo\b/.test(folded) && !/chó/i.test(query) && !/\bcho cho\b/.test(folded);
+    // 'cho mèo / cho thỏ / ...' uses cho as a preposition; 'chó' itself remains searchable.
+    const hasNonDogSpecies = /\b(?:meo|chim|hamster|chuot|tho)\b/.test(folded)
+        || /(?:^|[^\p{L}])(?:cá|cá cảnh)(?=$|[^\p{L}])/iu.test(String(query))
+        || /\bca canh\b/.test(folded);
+    const skipPrepositionCho = hasNonDogSpecies && !/chó/i.test(query) && !/\bcho cho\b/.test(folded);
     const terms = [];
     // Consume long phrases first, so "thức ăn ướt" means pâté rather than food.
     const aliases = CONCEPTS.flatMap(group => group.map(alias => ({ alias, canonical: group[0] }))).sort((a, b) => b.alias.length - a.alias.length);
     for (const { alias, canonical } of aliases) {
-        if (canonical === 'cho' && catOnly) continue;
+        if (canonical === 'cho' && skipPrepositionCho) continue;
         if (contains(folded, alias)) {
             terms.push(canonical);
             folded = (` ${folded} `).split(` ${alias} `).join(' ').trim();
         }
     }
-    terms.push(...folded.split(' ').filter(word => word && !STOP_WORDS.has(word) && !/^\d+$/.test(word) && !(catOnly && word === 'cho')));
+    terms.push(...folded.split(' ').filter(word => word && !STOP_WORDS.has(word) && !/^\d+$/.test(word) && !(skipPrepositionCho && word === 'cho')));
     return [...new Set(terms)];
 }
 
 function species(value) {
     const raw = String(value ?? '').normalize('NFC').toLowerCase();
+    const folded = normalizeText(raw);
     // An unaccented "cho" alone is often the Vietnamese preposition "for".
-    // Explicit chó, dog, or the unambiguous "cho cho" phrase are evidence.
+    // Accented "cá" avoids colliding with folded "ca" ("cả").
     return {
+        dog: /(?:^|[^\p{L}])(?:chó|dog|dogs)(?=$|[^\p{L}])/iu.test(raw) || /\bcho cho\b/.test(folded),
         cat: /(?:^|[^\p{L}])(?:mèo|meo|cat|cats)(?=$|[^\p{L}])/iu.test(raw),
-        dog: /(?:^|[^\p{L}])(?:chó|dog|dogs)(?=$|[^\p{L}])/iu.test(raw) || /\bcho cho\b/.test(normalizeText(raw))
+        bird: /(?:^|[^\p{L}])(?:chim|bird|birds)(?=$|[^\p{L}])/iu.test(raw),
+        fish: /(?:^|[^\p{L}])(?:cá|cá cảnh|fish)(?=$|[^\p{L}])/iu.test(raw) || /\bca canh\b/.test(folded),
+        hamster: /(?:^|[^\p{L}])(?:hamster|chuột hamster|chuột)(?=$|[^\p{L}])/iu.test(raw) || /\b(?:hamster|chuot)\b/.test(folded),
+        rabbit: /(?:^|[^\p{L}])(?:thỏ|tho|rabbit|rabbits)(?=$|[^\p{L}])/iu.test(raw),
     };
 }
 
@@ -148,8 +161,8 @@ function matchesSignals(row, signals) {
     if (signals.types.length && !signals.types.some(type => matchesType(row, type))) return false;
     if ([...signals.excluded].some(type => matchesType(row, type))) return false;
     // Species facts come from catalog relations, never guesses from prose.
-    if (signals.species.cat && !signals.species.dog && !row.pet_types.some(pet => pet.slug === 'cat')) return false;
-    if (signals.species.dog && !signals.species.cat && !row.pet_types.some(pet => pet.slug === 'dog')) return false;
+    const detectedSpecies = Object.entries(signals.species).filter(([, active]) => active).map(([slug]) => slug);
+    if (detectedSpecies.length === 1 && !row.pet_types.some(pet => pet.slug === detectedSpecies[0])) return false;
     return true;
 }
 
@@ -196,8 +209,11 @@ function createProductRepository({ db, categoryReader } = {}) {
             checkSignal(signal);
             const filters = validateFilters(input);
             const signals = searchSignals(filters.query, filters.keywords);
-            if (filters.species) signals.species = { cat: filters.species === 'cat', dog: filters.species === 'dog' };
-            const speciesFilter = filters.species || (signals.species.cat && !signals.species.dog ? 'cat' : signals.species.dog && !signals.species.cat ? 'dog' : null);
+            if (filters.species) {
+                signals.species = Object.fromEntries(PET_SPECIES.map(slug => [slug, slug === filters.species]));
+            }
+            const detectedSpecies = Object.entries(signals.species).filter(([, active]) => active).map(([slug]) => slug);
+            const speciesFilter = filters.species || (detectedSpecies.length === 1 ? detectedSpecies[0] : null);
             if (filters.productIds && !filters.productIds.length) return { products: [], totalMatches: 0, catalogLimited: false };
             const conditions = ['p.status = ?'];
             const params = [ACTIVE_STATUS];
